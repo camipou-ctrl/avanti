@@ -264,6 +264,28 @@
     .hoja-res thead { display: table-header-group; }
     .hoja-res tr { break-inside: avoid; }
   }
+  /* Cuadro de distribución */
+  .hoja-dist { max-width: 640px; margin: 0 auto 16px; background: #fff; border: 1px solid var(--linea); border-radius: var(--radio); padding: 22px; color: #111; }
+  .dist-cab { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid var(--azul); padding-bottom: 8px; margin-bottom: 10px; }
+  .dist-tit { font-size: 17px; font-weight: 800; color: var(--azul); letter-spacing: .3px; }
+  .dist-n { font-size: 20px; font-weight: 800; color: var(--rojo); }
+  .dist-des { font-size: 13px; line-height: 1.55; margin-bottom: 12px; }
+  .dist-t { font-size: 13px; }
+  .dist-t td { padding: 5px 8px; border-bottom: 1px solid #e6eaf1; }
+  .dist-t tr.sub td { background: #eef3fc; font-weight: 700; }
+  .dist-t tr.tot td { background: var(--azul); color: #fff; font-weight: 700; }
+  .dist-t tr.det td { color: var(--suave); font-size: 12px; padding-left: 20px; }
+  .dist-t td:nth-child(2) { width: 80px; color: var(--suave); }
+  .dist-t td:nth-child(3) { width: 120px; }
+  .dist-sec { margin: 16px 0 6px; font-weight: 800; font-size: 13px; color: var(--azul); letter-spacing: .3px; }
+  .dist-ag { margin-bottom: 8px; }
+  .dist-firma { display: flex; justify-content: space-between; gap: 40px; margin-top: 46px; font-size: 12px; color: var(--suave); }
+  .dist-firma div { flex: 1; border-top: 1px solid #999; padding-top: 4px; text-align: center; }
+  @media print {
+    .hoja-dist { border: 0; border-radius: 0; padding: 0; max-width: none; margin: 0; break-after: page; }
+    .hoja-dist:last-child { break-after: auto; }
+    .dist-t tr.sub td, .dist-t tr.tot td, .dist-cab { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
 </style>
 <style id="paginaImpresion"></style>
 </head>
@@ -683,8 +705,9 @@ function seg(clave, ops) {
 function vCuadro() {
   var D = E.datos, a = D.cuadro.agencias.filter(function (x) { return x.agencia === E.agCuadro; })[0];
   if (E.vistaCuadro === 'resumen') return vResumenImpr(a);
+  if (E.vistaCuadro === 'dist') return vDistribucion(a);
   var h = '<h2>Cuadro · ' + periodo() + '</h2><p class="sub">Lo que se le paga a cada agente y lo que queda para la oficina, según el listado del sistema.</p>';
-  h += '<div class="barra-filtros">' + seg('agCuadro', [['Avanti', 'Avanti'], ['Avanti II', 'Avanti II']]) + (a && a.resumen.length && !esAnio() ? '<button class="btn pri" data-resumen>Imprimir Resumen ' + esc(E.agCuadro) + '</button>' : '') + '</div>';
+  h += '<div class="barra-filtros">' + seg('agCuadro', [['Avanti', 'Avanti'], ['Avanti II', 'Avanti II']]) + (a && a.resumen.length && !esAnio() ? '<button class="btn" data-dist>Cuadro de distribución</button><button class="btn pri" data-resumen>Imprimir Resumen ' + esc(E.agCuadro) + '</button>' : '') + '</div>';
   if (!a || !a.agentes.length) return h + '<div class="card vacio">No hay transacciones de ' + E.agCuadro + ' en ' + periodo() + '. Importa el listado del sistema.</div>';
   h += '<div class="grid g4">';
   h += '<div class="card kpi"><div class="l">Comisión bruta</div><div class="v num">' + d(a.cb) + '</div><div class="muted" style="font-size:12px">' + a.transacciones + ' transacciones</div></div>';
@@ -713,6 +736,91 @@ function vCuadro() {
     h += '<div style="padding:6px 0;border-bottom:1px solid #f0f2f6"><div style="display:flex;justify-content:space-between"><b>' + esc(p.persona) + '</b><b class="num">' + d(p.saldo) + '</b></div><div class="muted" style="font-size:12px">' + p.conceptos.map(function (c) { return esc(c.concepto) + ' ' + esc(c.agencia) + ' ' + d(c.monto); }).join(' · ') + (p.entregado ? ' · entregado −' + d(p.entregado) : '') + '</div></div>';
   });
   h += '</div></div>';
+  return h;
+}
+
+
+/* ───────── Cuadro de distribución (una hoja por negociación, para entregar al agente) ───────── */
+function negociacionesDist(a) {
+  var negs = [], idx = {};
+  a.resumen.forEach(function (r) {
+    var k = r.mes + '|' + r.numero;
+    if (idx[k] === undefined) { idx[k] = negs.length; negs.push({ clave: k, mes: r.mes, numero: r.numero, filas: [] }); }
+    negs[idx[k]].filas.push(r);
+  });
+  return negs;
+}
+function vDistribucion(a) {
+  var negs = negociacionesDist(a);
+  if (E.distSel == null && negs.length) E.distSel = negs[0].clave;
+  var h = '<div class="barra-acc no-imprimir"><button class="btn" data-volver-cuadro>← Volver</button>';
+  h += '<select id="selDist" class="campo" style="flex:1;min-width:200px;max-width:520px">';
+  negs.forEach(function (n) {
+    var r = n.filas[0];
+    h += '<option value="' + esc(n.clave) + '"' + (E.distSel === n.clave ? ' selected' : '') + '>Nº ' + n.numero + ' · ' + esc(corto(r.captador)) + (r.colocador !== r.captador ? ' / ' + esc(corto(r.colocador)) : '') + ' · ' + esc(r.descripcion) + '</option>';
+  });
+  h += '<option value="todas"' + (E.distSel === 'todas' ? ' selected' : '') + '>Todas (' + negs.length + ', una por hoja)</option></select>';
+  h += '<button class="btn pri" data-imprimir>Imprimir</button></div>';
+  var ver = E.distSel === 'todas' ? negs : negs.filter(function (n) { return n.clave === E.distSel; });
+  h += ver.map(function (n) { return hojaDistribucion(n, a); }).join('');
+  return h;
+}
+function hojaDistribucion(n, a) {
+  var P = E.datos.cuadro.distribucion || { regalia: 0.05, iva: 0.16, ivaAgente: 0.8, coord: {}, broker: {}, uno: {} };
+  var f = n.filas, r0 = f[0], ag = a.agencia;
+  function suma(k) { return f.reduce(function (s, r) { return s + (r[k] || 0); }, 0); }
+  var cb = suma('punta'), reg = suma('regalia'), dist = suma('dist'), comAg = suma('comAg'), ivaAg = suma('ivaAg'), spiff = suma('spiff');
+  var coord = suma('coord'), broker = suma('broker'), uno = suma('unoPct');
+  var ivaReg = reg * P.iva, ivaOf = Math.max(ivaReg - ivaAg, 0), neta = cb - reg - ivaOf;
+  var cancelado = comAg + coord + broker + uno, bruto = dist - cancelado, netoAg = bruto - ivaOf;
+  function p2(x) { return fmt.format((x || 0) * 100) + '%'; }
+  function porDist(x) { return dist ? p2(x / dist) : ''; }
+  function fila(t, pc, v, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + t + '</td><td class="d">' + (pc || '') + '</td><td class="d">' + (v === '' ? '' : fmt.format(v || 0)) + '</td></tr>'; }
+  var nivelDe = {}; f.forEach(function (r) { nivelDe[r.agente] = r.nivel; });
+  function persona(rol, nombre) { return rol.toUpperCase() + ': ' + esc(nombre) + (nivelDe[nombre] ? ' ' + pct(nivelDe[nombre]) : ' (otra agencia)'); }
+
+  var h = '<div class="hoja hoja-dist">';
+  h += '<div class="dist-cab"><div><div class="dist-tit">CUADRO DE DISTRIBUCIÓN</div><div>' + esc(n.mes.toUpperCase()) + ' ' + E.datos.anio + ' · ' + esc(ag.toUpperCase()) + '</div></div><div class="dist-n">Nº ' + n.numero + '</div></div>';
+  h += '<div class="dist-des"><b>' + esc(r0.descripcion) + (r0.sinReparto ? ' (sin reparto)' : '') + '</b><br>' + persona('Captador', r0.captador) + '<br>' + persona('Colocador', r0.colocador) +
+    '<br><span class="muted">Código: ' + esc(r0.codigo || '—') + ' · Cierre: ' + esc(r0.cierre || '—') + ' · Monto: $' + fmt.format(r0.monto) + ' · Comisión total: $' + fmt.format(r0.comision) + '</span></div>';
+  h += '<table class="dist-t"><tbody>';
+  h += fila('<b>INGRESO COMISIÓN BRUTA</b>', '', cb, 'sub');
+  h += fila('REGALÍA MASTER', p2(P.regalia), reg);
+  h += fila('IVA REGALÍA', p2(P.iva), ivaReg);
+  h += fila('IVA a pagar oficina', p2(1 - P.ivaAgente), ivaOf, 'det');
+  h += fila('IVA a pagar agente', p2(P.ivaAgente), ivaAg, 'det');
+  h += fila('<b>COMISIÓN NETA</b>', '', neta, 'sub');
+  h += fila('COMISIÓN AGENTES', porDist(comAg), comAg);
+  h += fila('BROKER ' + esc((P.broker[ag] || '').toUpperCase()), porDist(broker), broker);
+  h += fila('COORDINACIÓN ' + esc((P.coord[ag] || '').toUpperCase()), porDist(coord), coord);
+  h += fila('COORD. ' + esc((P.uno[ag] || '').toUpperCase()), porDist(uno), uno);
+  h += '</tbody></table>';
+
+  h += '<div class="dist-sec">PAGO DE COMISIONES INDIVIDUALES</div>';
+  var personas = [], pos = {};
+  f.forEach(function (r) {
+    if (pos[r.agente] === undefined) { pos[r.agente] = personas.length; personas.push({ nombre: r.agente, roles: [], comAg: 0, spiff: 0, ivaAg: 0, cancelar: 0 }); }
+    var x = personas[pos[r.agente]];
+    x.roles.push(r.rol); x.comAg += r.comAg; x.spiff += r.spiff; x.ivaAg += r.ivaAg; x.cancelar += r.cancelar;
+  });
+  personas.forEach(function (x) {
+    h += '<table class="dist-t dist-ag"><tbody><tr class="sub"><td>' + esc(x.nombre.toUpperCase()) + '</td><td class="d muted" style="font-weight:500">' + (x.roles.length > 1 ? 'Doble punta' : esc(x.roles[0])) + '</td><td class="d"></td></tr>';
+    h += fila('Comisiones', '', x.comAg);
+    h += fila('SPIFF', '', x.spiff ? x.spiff : '');
+    h += fila('(−) ' + pct(P.ivaAgente) + ' IVA regalía', '', x.ivaAg);
+    h += fila('<b>Total a cancelar</b>', '', x.cancelar, 'tot');
+    h += '</tbody></table>';
+  });
+
+  h += '<table class="dist-t" style="margin-top:12px"><tbody>';
+  h += fila('<b>TOTAL CANCELADO</b>', porDist(cancelado), cancelado, 'sub');
+  h += fila('TOTAL INGRESO BRUTO AGENCIA', '', bruto);
+  h += fila('IVA REGALÍA EMPRESA', '', ivaOf);
+  h += fila('<b>TOTAL INGRESO NETO AGENCIA</b>', porDist(netoAg), netoAg, 'tot');
+  if (spiff) h += fila('SPIFF entregado (aporte del propietario)', '', spiff);
+  h += '</tbody></table>';
+  h += '<div class="dist-firma"><div>Recibido por</div><div>Administración</div></div>';
+  h += '</div>';
   return h;
 }
 
@@ -1056,6 +1164,9 @@ function enlazar() {
   $$('[data-resumen]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = 'resumen'; pintar(); window.scrollTo(0, 0); }); });
   $$('[data-volver-cuadro]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = null; pintar(); }); });
   $$('[data-imprimir-resumen]').forEach(function (el) { el.addEventListener('click', imprimirResumen); });
+  $$('[data-dist]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = 'dist'; E.distSel = null; pintar(); window.scrollTo(0, 0); }); });
+  var selDist = $('#selDist');
+  if (selDist) selDist.addEventListener('change', function () { E.distSel = selDist.value; pintar(); });
 }
 
 /* ───────── Formulario de negociación ───────── */
