@@ -468,26 +468,30 @@ var PEDIDO = 0;
 function claveLocal(mes, anio) { return 'remax_mes_' + mes + '_' + anio; }
 function arrancar() {
   // 1) Lo último que se vio aparece al instante; 2) los datos frescos llegan en una sola llamada
-  var ini = leerLocal('remax_ini'), previo = ini && leerLocal(claveLocal(ini.mes, ini.anio));
-  if (ini) { ponerIni(ini); if (previo) mostrarDatos(previo, false); }
+  //    Cada persona abre en el mes que dejó (se guarda en este teléfono/computadora)
+  var ini = leerLocal('remax_ini'), mio = leerLocal('remax_mesSel') || {};
+  var previo = ini && leerLocal(claveLocal(mio.mes || ini.mes, mio.anio || ini.anio));
+  if (ini) { ponerIni(ini, mio); if (previo) mostrarDatos(previo, false); }
   if (!E.datos) cargando(true);
   var n = ++PEDIDO;
-  api('app_arranque').then(function (r) {
+  api('app_arranque', mio.mes || '', mio.anio || '').then(function (r) {
     guardarLocal('remax_ini', r.ini);
-    guardarLocal(claveLocal(r.ini.mes, r.ini.anio), r.datos);
+    guardarLocal(claveLocal(r.mes, r.anio), r.datos);
     if (n !== PEDIDO) { E.ini = r.ini; llenarSelectsForm(); return; }
-    ponerIni(r.ini);
+    ponerIni(r.ini, { mes: r.mes, anio: r.anio });
     mostrarDatos(r.datos, !!previo);
   }).catch(function (e) {
     if (/SESION/.test(e.message)) { cargando(false); return; }
     if (E.datos) { cargando(false); toast('No pude actualizar: ' + e.message, 5000); } else error(e);
   });
 }
-function ponerIni(ini) {
+function ponerIni(ini, mio) {
   E.ini = ini;
   $('#selMes').innerHTML = '<option value="Año">Todo el año</option>' + ini.meses.map(function (m) { return '<option>' + m + '</option>'; }).join('');
   $('#selAnio').innerHTML = ini.anios.map(function (a) { return '<option>' + a + '</option>'; }).join('');
-  $('#selMes').value = ini.mes; $('#selAnio').value = ini.anio;
+  $('#selMes').value = (mio && mio.mes) || ini.mes; $('#selAnio').value = (mio && mio.anio) || ini.anio;
+  if (!$('#selMes').value) $('#selMes').value = ini.mes;
+  if (!$('#selAnio').value) $('#selAnio').value = ini.anio;
   $('#lstAgentes').innerHTML = ini.agentes.map(function (a) { return '<option value="' + esc(a.nombre) + '">' + esc(a.agencia) + '</option>'; }).join('');
   llenarSelectsForm();
   $('#quien').textContent = ini.usuario || '';
@@ -551,8 +555,9 @@ function cargarMes(cambioMes, forzar) {
   });
 }
 
-$('#selMes').addEventListener('change', function () { cargarMes(true); });
-$('#selAnio').addEventListener('change', function () { cargarMes(true); });
+function recordarMes() { guardarLocal('remax_mesSel', { mes: $('#selMes').value, anio: Number($('#selAnio').value) }); }
+$('#selMes').addEventListener('change', function () { recordarMes(); cargarMes(true); });
+$('#selAnio').addEventListener('change', function () { recordarMes(); cargarMes(true); });
 $('#btnRecargar').addEventListener('click', function () { cargarMes(false, true); });
 $('#tabs').addEventListener('click', function (ev) {
   var b = ev.target.closest('button'); if (!b) return;
@@ -1363,9 +1368,10 @@ function cargarConfig() {
 function vConfig() {
   if (!E.cfg) { setTimeout(cargarConfig, 0); return '<h2>Configuración</h2><div class="grid g2"><div class="esqueleto"></div><div class="esqueleto"></div></div>'; }
   var h = '<h2>Configuración</h2><p class="sub">Lo que cambies aquí se guarda solo en la BASE CENTRAL, el Análisis y el Flujo. No hace falta abrir los Sheets.</p>';
-  h += '<div class="barra-filtros">' + seg('cfgVista', [['agentes', 'Agentes'], ['parametros', 'Porcentajes y metas'], ['pin', 'Mi PIN']]) + '</div>';
+  h += '<div class="barra-filtros">' + seg('cfgVista', [['agentes', 'Agentes'], ['parametros', 'Porcentajes y metas'], ['respaldo', 'Respaldos'], ['pin', 'Mi PIN']]) + '</div>';
   if (E.cfgVista === 'parametros') return h + vParametros();
   if (E.cfgVista === 'pin') return h + vPin();
+  if (E.cfgVista === 'respaldo') return h + vRespaldo();
   return h + vAgentesCfg();
 }
 function vAgentesCfg() {
@@ -1457,6 +1463,21 @@ function vParametros() {
   h += '<div class="acciones" style="position:sticky;bottom:0;background:var(--fondo,#f6f7fb);padding:10px 0"><button class="btn pri" id="pOk">Guardar cambios</button></div>';
   return h;
 }
+function vRespaldo() {
+  var R = E.respaldo;
+  if (!R) {
+    setTimeout(function () { api('app_respaldo').then(function (r) { E.respaldo = r; pintar(); }).catch(function (e) { E.respaldo = { error: e.message }; pintar(); }); }, 0);
+    return '<div class="esqueleto" style="max-width:520px"></div>';
+  }
+  var h = '<div class="card" style="max-width:520px"><div class="card-t"><b>Respaldo semanal</b></div>';
+  if (R.error) return h + '<p class="aviso">No pude leer el respaldo: ' + esc(R.error) + '</p></div>';
+  h += '<p style="margin:0 0 8px">Cada <b>domingo a las 10 pm</b> se guarda una copia de la BASE CENTRAL, el Análisis y el Flujo. Se quedan las últimas 8 semanas.</p>';
+  h += '<p style="margin:0 0 4px">Estado: ' + (R.activo ? '<span class="chip verde">Activo</span>' : '<span class="chip ambar">Sin activar</span>') + '</p>';
+  h += '<p style="margin:0 0 12px">Último respaldo: <b>' + (R.ultimo ? esc(R.ultimo) : 'todavía ninguno') + '</b></p>';
+  h += '<div class="acciones" style="justify-content:flex-start;flex-wrap:wrap">' + (R.carpeta ? '<a class="btn" href="' + esc(R.carpeta) + '" target="_blank" rel="noopener">Abrir carpeta en Drive</a>' : '') + '<button class="btn pri" id="respAhora">Hacer respaldo ahora</button></div>';
+  if (!R.activo) h += '<p class="muted" style="font-size:12px;margin-top:10px">Para activarlo, Roman debe ejecutar una vez <b>instalarRespaldo</b> en el editor de Apps Script.</p>';
+  return h + '</div>';
+}
 function vPin() {
   var h = '<div class="card" style="max-width:420px"><div class="card-t"><b>Cambiar mi PIN</b></div><div class="form">';
   h += '<div class="full"><label>PIN actual</label><input id="pin0" type="password" inputmode="numeric" maxlength="6"></div>';
@@ -1480,6 +1501,12 @@ function enlazarConfig() {
     api('app_guardarParametros', nuevo).then(function () { toast('Guardado'); E.datosViejos = true; return cargarConfig(); })
       .catch(function (e) { cargando(false); pOk.disabled = false; toast('No se guardó: ' + (e.message || e), 6000); });
   });
+  var rA = $('#respAhora');
+  if (rA) rA.addEventListener('click', function () {
+    rA.disabled = true; cargando(true);
+    api('app_respaldoAhora').then(function (r) { E.respaldo = r; cargando(false); toast('Respaldo guardado'); pintar(); })
+      .catch(function (e) { cargando(false); rA.disabled = false; toast('No se pudo: ' + e.message, 6000); });
+  });
   var pinOk = $('#pinOk');
   if (pinOk) pinOk.addEventListener('click', function () {
     var a = $('#pin0').value, n1 = $('#pin1').value, n2 = $('#pin2').value;
@@ -1499,7 +1526,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-07T12:39:53.944Z';
+  var VERSION = '2026-11-07T12:50:00.508Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
