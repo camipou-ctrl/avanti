@@ -1497,6 +1497,23 @@ $$('.modal').forEach(function (m) {
 });
 document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$('.modal.on').forEach(function (m) { m.classList.remove('on'); }); });
 </script>
-<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});</script>
+<script>
+(function () {
+  var VERSION = '2026-11-07T12:39:53.944Z';
+  if ('serviceWorker' in navigator) {
+    var habia = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
+    navigator.serviceWorker.addEventListener('controllerchange', function () { if (habia) location.reload(); });
+  }
+  var ultima = Date.now();
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible' || Date.now() - ultima < 60000) return;
+    ultima = Date.now();
+    fetch('version.json?t=' + ultima, { cache: 'no-store' }).then(function (r) { return r.json(); })
+      .then(function (v) { if (v.version && v.version !== VERSION && !document.querySelector('.modal.on')) location.reload(); })
+      .catch(function () {});
+  });
+})();
+</script>
 </body>
 </html>
