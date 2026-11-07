@@ -230,6 +230,8 @@
   .form input, .form select, .form textarea { width: 100%; border: 1px solid var(--linea); border-radius: 9px; padding: 8px 10px; background: #fff; }
   .campo-t { width: 100%; min-width: 80px; border: 1px solid var(--linea); border-radius: 8px; padding: 6px 8px; background: #fff; font: inherit; }
   .btn.chico { padding: 4px 10px; font-size: 12px; }
+  .solo-movil { display: none; }
+  @media (max-width: 560px) { .solo-movil { display: block; } }
   .form textarea { min-height: 60px; resize: vertical; }
   .form .check { display: flex; align-items: center; gap: 8px; background: var(--rojo-bg); color: var(--rojo); padding: 8px 10px; border-radius: 9px; font-weight: 600; }
   .form .check input { width: auto; }
@@ -310,6 +312,7 @@
       <button data-t="cuadre">Revisar vs sistema</button>
       <button data-t="analisis">Análisis</button>
       <button data-t="flujo">Flujo</button>
+      <button data-t="chat">Chat y matches</button>
       <button data-t="config" title="Configuración">⚙ Configuración</button>
     </nav>
   </div>
@@ -397,7 +400,274 @@
   </div>
 </div>
 
+<!-- Modal cargar chat / inventario -->
+<div class="modal" id="modalChat">
+  <div class="caja">
+    <div class="cab"><b>Cargar chat e inventario</b><button class="x" data-cerrar>×</button></div>
+    <p style="margin-top:0">Puedes subir todo junto:</p>
+    <ul style="margin:0 0 8px 18px;padding:0;font-size:13px">
+      <li><b>Chat de WhatsApp</b> exportado (el <b>.zip</b> o el <b>.txt</b>). Solo se agregan los mensajes nuevos.</li>
+      <li><b>Listado de inmuebles</b> de Novus de Avanti y de Avanti II (<b>.xlsx</b>). Reemplaza el inventario de esa agencia.</li>
+    </ul>
+    <input type="file" id="archChat" accept=".zip,.txt,.xlsx,.xls" multiple style="margin:8px 0 12px; width:100%">
+    <div id="resChat"></div>
+    <div class="acciones">
+      <button class="btn" data-cerrar>Cerrar</button>
+      <button class="btn pri" id="btnChatSubir" disabled>Guardar</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+/* ───────── Chat de WhatsApp + inventario Novus: lectura, clasificación y matches ─────────
+ * Se usa igual en la app (navegador) y en las pruebas (node).
+ */
+var CHAT = (function () {
+  function norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim(); }
+
+  /* ── 1. Leer el .txt exportado (formato iPhone "[d/m/aa, h:mm:ss a. m.] Nombre: texto" y Android "d/m/aa, h:mm - Nombre: texto") ── */
+  var RX_IOS = /^‎?\[(\d{1,2})\/(\d{1,2})\/(\d{2,4}),? (\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])?\.?\s*\.?\s*m?\.?\]\s([^:]+?):\s?([\s\S]*)$/i;
+  var RX_AND = /^‎?(\d{1,2})\/(\d{1,2})\/(\d{2,4}),? (\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])?\.?\s*\.?\s*m?\.?\s[-–]\s([^:]+?):\s?([\s\S]*)$/i;
+  function leer(texto, mesPrimero) {
+    var lineas = String(texto).replace(/\r/g, '').split('\n'), msgs = [], act = null;
+    // ¿El export viene mes/día (iPhone en inglés) o día/mes? Se decide viendo si algún primer número pasa de 12.
+    if (mesPrimero === undefined) {
+      var a = 0, b = 0;
+      lineas.forEach(function (l) { var m = l.match(/^‎?\[?(\d{1,2})\/(\d{1,2})\//); if (m) { if (+m[1] > 12) a++; if (+m[2] > 12) b++; } });
+      mesPrimero = b > a;
+    }
+    lineas.forEach(function (l) {
+      var m = l.match(RX_IOS) || l.match(RX_AND);
+      if (m) {
+        var d1 = +m[1], d2 = +m[2], dia = mesPrimero ? d2 : d1, mes = mesPrimero ? d1 : d2, anio = +m[3]; if (anio < 100) anio += 2000;
+        var h = +m[4], ap = (m[7] || '').toLowerCase();
+        if (ap === 'p' && h < 12) h += 12; if (ap === 'a' && h === 12) h = 0;
+        act = { fecha: anio + '-' + ('0' + mes).slice(-2) + '-' + ('0' + dia).slice(-2), hora: ('0' + h).slice(-2) + ':' + m[5], autor: m[8].trim(), texto: m[9] };
+        msgs.push(act);
+      } else if (act) act.texto += '\n' + l;
+    });
+    msgs.forEach(function (x) { x.texto = x.texto.replace(/‎/g, '').trim(); });
+    return msgs;
+  }
+
+  /* ── 2. Vocabulario ── */
+  var ZONAS = [
+    ['Puerta Maraven', ['puerta maraven', 'pta maraven', 'pta. maraven', 'la puerta', 'maraven']],
+    ['Punta Cardón', ['punta cardon', 'pta cardon', 'pta. cardon']],
+    ['Cardón', ['comunidad cardon', 'cardon']],
+    ['Centro', ['centro de punto fijo', 'el centro', 'centro']],
+    ['Judibana', ['judibana']], ['Adícora', ['adicora']], ['Santa Irene', ['santa irene', 'sta irene', 'sta. irene']],
+    ['Casacoima', ['casacoima']], ['Bella Vista', ['bella vista', 'bellavista']], ['Villa Marina', ['villa marina', 'villamarina']],
+    ['Las Virtudes', ['las virtudes', 'virtudes']], ['Balcones', ['balcones']], ['Amuay', ['amuay']], ['Los Taques', ['los taques', 'taques']],
+    ['San Román', ['san roman']], ['Antiguo Aeropuerto', ['antiguo aeropuerto', 'antiguo a']], ['Santa Fe', ['santa fe', 'sta fe']],
+    ['Av. Ollarvides', ['ollarvides', 'ollavirdes', 'olla virdes', 'ollarvidez']], ['Guanadito', ['guanadito']], ['Sambil', ['sambil']], ['Caja de Agua', ['caja de agua']],
+    ['Club de Golf', ['club de golf', 'golf']], ['Zarabón', ['zarabon']], ['Pedro Manuel', ['pedro manuel', 'pedro 2', 'pedro ii', 'pedro 1', 'pedro i', 'la pedro', 'urb pedro', 'urbanizacion pedro']],
+    ['C.C. Doral', ['doral']], ['San Rafael', ['san rafael']], ['Las Margaritas', ['margaritas']], ['Banco Obrero', ['banco obrero']],
+    ['Terranova', ['terranova', 'terra nova']], ['Av. Ali Primera', ['ali primera']], ['Los Caciques', ['caciques']], ['Jacinto Lara', ['jacinto lara']],
+    ['Coro', ['coro']], ['General Pelayo', ['pelayo']], ['Mirasol', ['mirasol']], ['Av. Táchira', ['tachira']], ['Cristal', ['cristal']],
+    ['Villa Don Carlos', ['don carlos']], ['Pueblo Nuevo', ['pueblo nuevo']], ['Ciudad del Viento', ['ciudad del viento']], ['Las Santas', ['las santas']],
+    ['Charaima', ['charaima']], ['Las Mercedes', ['las mercedes']], ['Salamar', ['salamar']], ['Brisamar', ['brisamar']], ['Guaranao', ['guaranao']],
+    ['Santa Elena', ['santa elena', 'sta elena']], ['Altamira', ['altamira']], ['El Taparo', ['taparo']], ['Cuabana', ['cuabana']],
+    ['Ezequiel Zamora', ['ezequiel zamora']], ['La Lagunita', ['lagunita']], ['Las Cabañas', ['las cabanas']], ['Campo Claro', ['campo claro']],
+    ['Manaure', ['manaure']], ['Las Piedras', ['las piedras']], ['María Auxiliadora', ['maria auxiliadora', 'mariauxiliadora']], ['Marianas', ['marianas']],
+    ['Solimar', ['solimar']], ['Taratara', ['taratara']], ['Villa de Oro', ['villa de oro']], ['Costa Caribeña', ['costa caribena']],
+    ['Villas Olvan', ['olvan']], ['Tacuato', ['tacuato']], ['Los Médanos', ['medanos']], ['Creolandia', ['creolandia']], ['Las Cumaraguas', ['cumaragua']],
+    ['Guaranao', ['guaranao']], ['El Pico', ['el pico']], ['Buena Vista', ['buena vista']], ['Moruy', ['moruy']], ['Santa Ana', ['santa ana']]
+  ];
+  var TIPOS = [
+    ['Casa', /\b(casas?|town ?house|townhouses?|quintas?|th)\b/],
+    ['Apartamento', /\b(apartamentos?|aptos?|apto\.|apart|pent ?house|anexos?)\b/],
+    ['Galpón', /\b(galpon|galpones|deposito industrial|nave industrial)\b/],
+    ['Local/Comercial', /\b(locales?|local comercial|consultorios?|negocios?|fondo de comercio)\b/],
+    ['Terreno', /\b(terrenos?|parcelas?|lotes?)\b/],
+    ['Oficina', /\b(oficinas?)\b/],
+    ['Edificio', /\b(edificios?)\b/],
+    ['Posada/Hotel', /\b(posadas?|hotel(es)?)\b/],
+    ['Finca', /\b(fincas?|haciendas?|granjas?)\b/],
+    ['Habitación', /\b(habitacion|cuarto) (en alquiler|amoblad)|alquiler de (una )?(habitacion|cuarto)/]
+  ];
+  // Tipo de Novus → categoría del chat
+  var TIPO_NOVUS = {
+    'casa o townhouse': 'Casa', 'apartamento': 'Apartamento', 'local comercial': 'Local/Comercial', 'consultorio medico': 'Local/Comercial',
+    'negocio': 'Local/Comercial', 'local industrial y galpon': 'Galpón', 'terreno y parcela': 'Terreno', 'oficina': 'Oficina', 'edificio': 'Edificio',
+    'posada turistica': 'Posada/Hotel', 'hotel': 'Posada/Hotel', 'hacienda y finca': 'Finca', 'habitacion': 'Habitación', 'club': 'Local/Comercial'
+  };
+  var ADMIN = /(^|\s)(andrea|verónica asesores|veronica asesores|cyyma|asesores virtudes|tú$|^tu$)/i;
+
+  function zonasDe(t) {
+    var n = ' ' + norm(t).replace(/centro comercial|c\.c\.? sambil/g, ' ') + ' ', z = [];
+    ZONAS.forEach(function (x) {
+      if (z.indexOf(x[0]) >= 0) return;
+      if (x[1].some(function (a) { return new RegExp('[^a-z0-9]' + a.replace(/[.]/g, '\\.') + '[^a-z0-9]').test(n); })) {
+        // "Puerta Maraven" ya incluye "maraven"; "Punta Cardón" ya incluye "cardón"
+        if (x[0] === 'Cardón' && z.indexOf('Punta Cardón') >= 0 && !/comunidad cardon/.test(n)) return;
+        z.push(x[0]);
+      }
+    });
+    return z;
+  }
+  function tiposDe(t) { var n = norm(t), r = []; TIPOS.forEach(function (x) { if (x[1].test(n)) r.push(x[0]); }); return r; }
+  function operacionDe(t) {
+    var n = norm(t), v = /\b(venta|vende|vendo|compra|comprar|compro|comprador|financiamiento|credito)\b/.test(n), a = /\b(alquiler|alquila|alquilar|alquilo|arriendo|renta|canon)\b/.test(n);
+    return v && !a ? 'Venta' : a && !v ? 'Alquiler' : v && a ? 'Venta y alquiler' : 'Sin especificar';
+  }
+  /* Presupuesto: {min, max, texto}. Ignora metros, teléfonos y años. */
+  function precioDe(t) {
+    var n = norm(t).replace(/(\d)\s+\.(\d{3})/g, '$1.$2').replace(/(\d)\s*mil\b/g, '$1.000').replace(/(\d)\s*k\b/g, '$1.000');
+    var nums = [], rx = /\$?\s?(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d{1,2})?)\s*(\$|usd|dolares|verdes|mts2?|m2|mt2|metros|mts|hab|habitaciones|cuartos|banos|años|anos|puestos)?/g, m;
+    while ((m = rx.exec(n))) {
+      var u = m[2] || '', crudo = m[1];
+      if (/mts|m2|mt2|metros|hab|cuarto|bano|ano|puesto/.test(u)) continue;
+      var v = Number(crudo.replace(/[.,](\d{3})(?=$|[.,])/g, '$1').replace(/[.,](\d{3})(?=$|[.,])/g, '$1').replace(',', '.'));
+      if (!isFinite(v) || v < 80 || v > 5000000) continue;
+      if (/^\d{7,}$/.test(crudo)) continue; // teléfono
+      if (v >= 1900 && v <= 2035 && !/\$|usd/.test(u) && !/\./.test(crudo)) continue; // año
+      nums.push({ v: v, conMoneda: /\$|usd|dolar|verde/.test(u) || /\$/.test(m[0]) });
+    }
+    if (!nums.length) return null;
+    var entre = n.match(/entre\s+\$?\s?([\d.,]+)\s*\$?\s*(?:y|a|-)\s*\$?\s?([\d.,]+)/);
+    var max = nums[0].v, min = 0;
+    if (entre && nums.length > 1) { min = nums[0].v; max = nums[1].v; if (min > max) { var x = min; min = max; max = x; } }
+    else if (/\b(desde|minimo|a partir de)\b/.test(n) && !/\bhasta\b/.test(n)) { min = nums[0].v; max = 0; }
+    return { min: min, max: max };
+  }
+  function habitacionesDe(t) { var m = norm(t).match(/(\d)\s*(hab|habitaciones|habitacion|cuartos|dormitorios|h\b)/); return m ? +m[1] : 0; }
+
+  /* ── 3. Clasificar ── */
+  var RX_CAPT = /(nueva captaci|nuevas captaci|en proceso de captaci|captamos|captacion nueva|recien captad|acabo de captar|\bcaptad[oa]s?\b|tenemos nueva|nuevo inmueble|nueva propiedad|nuevo ingreso)/;
+  var RX_CIERRE = /(captador\s*:|colocador\s*:|vendido|alquilado|cerrad[oa] con exito|felicidades|felicitaciones)/;
+  var RX_SOL = /(\bbusc|solicit|necesit|tengo (un |una )?(client|comprador|inquilin|interesad|requerimiento)|tengo (un |una )?(persona|pareja|familia|senor|senora|empresa)|quien (tenga|tiene|maneja)|alguien (que )?(tenga|tiene|maneje)|requerimiento|requiero|requieren|opciones? de|alguna opcion|algun[ao]? .*(en venta|en alquiler)\s*\?|me pasan|me envian|enviarme|al privado|tienen? (algun|alguna|casa|apart|local|terreno|galpon|oficina)|tenemos (algun|alguna|casa|apart|local|terreno|galpon|oficina|en )|hay (algun|alguna) |quien me ayuda|ayuda con|que (nos )?queda disponible|interesad[oa] en|cliente (que )?(busca|quiere|necesita|requiere)|presupuesto|hasta \$?\d)/;
+  var RX_OFER = /(se vende|se alquila|en venta|en alquiler|disponible|oportunidad|rebaj|precio especial|remate|oferta|nuevo precio|bajo de precio|bajo precio|subio de precio|exclusiva|vendo|alquilo|acepta|negociable|se traspasa|traspaso)/;
+  function clasificar(m) {
+    var t = m.texto, n = norm(t);
+    if (ADMIN.test(m.autor)) return 'Descartado';
+    var limpio = n.replace(/<[^>]*omitid[oa]>|<multimedia omitido>|imagen omitida|video omitido|mensaje de voz omitido|documento omitido|sticker omitido|gif omitido|se elimino este mensaje|este mensaje fue eliminado|<se edito este mensaje\.?>/g, '').trim();
+    if (limpio.length < 12) return 'Descartado';
+    if (/^(buen(os|as)? (dias|tardes|noches)|bendecid|feliz|gracias|amen|excelente|felicidades|ok|listo|si\b|no\b)/.test(limpio) && limpio.length < 40) return 'Descartado';
+    if (RX_CIERRE.test(limpio)) return 'Descartado';
+    if (/\bquien (es|fue) (el|la) captador/.test(limpio) || /de quien es/.test(limpio)) return 'Descartado';
+    var tieneInm = tiposDe(limpio).length || operacionDe(limpio) !== 'Sin especificar' || zonasDe(limpio).length;
+    var tipoUOp = tiposDe(limpio).length || operacionDe(limpio) !== 'Sin especificar';
+    var pregunta = /\?|por ?favor|porfa|\bpf\b|\bplis\b|🙏/.test(limpio + t);
+    var ofertaFuerte = /(se vende|se alquila|vendo|alquilo|oportunidad|exclusiva|precio especial|rebaj|remate|traspas|nuevo precio|subio de precio|bajo de precio|acepta|negociable|mañana la subo|vuelve .* inventario)/.test(limpio);
+    if (/(fotos?|videos?|flyers?|informacion de (esta|este)|ficha|la propuesta|publicacion que)/.test(limpio) && !/(busco|solicito|cliente)/.test(limpio)) return 'Descartado';
+    if (/\b(esta|este) (casa|apartamento|apto|local|galpon|parcela|terreno|propiedad|inmueble)\b/.test(limpio) && !/(busco|solicito|necesito|requiero|cliente)/.test(limpio)) return 'Descartado';
+    if (/^(hola |buen[oa]s? (dias|tardes|noches)[ ,.!]*)?(venta o alquiler|alquiler o venta)\s*\?*$/.test(limpio)) return 'Descartado';
+    if (RX_CAPT.test(limpio) && !/alguien tiene captad|tiene captad|estara por captar/.test(limpio)) return 'Captación';
+    if (/\bpresupuesto\b/.test(limpio) && precioDe(limpio)) return 'Solicitud';
+    if (tieneInm && RX_SOL.test(limpio)) return 'Solicitud';
+    if (tieneInm && /que (nos )?(tenemos|queda|hay)|tenemos .*\?|alguien con|alguno con|alguna? (casa|apart|local|terreno|galpon|oficina|opcion)/.test(limpio)) return 'Solicitud';
+    if (tieneInm && /(maximo|no mas de|no pase de|menos de|no importa la zona|economic|quienes tengan|alguno tendra|tenemos algo|poseemos|quien mas con|les agradeceria|me envien)/.test(limpio)) return 'Solicitud';
+    if (tipoUOp && pregunta && !ofertaFuerte) return 'Solicitud';
+    if (tiposDe(limpio).length && limpio.length < 100 && !ofertaFuerte && !/omitid|reenviado/.test(n) && !/\$|\d{2,}\.\d{3}/.test(limpio)) return 'Solicitud';
+    if (tieneInm && (ofertaFuerte || RX_OFER.test(limpio))) return 'Oferta/Publicación';
+    return 'Descartado';
+  }
+
+  /* Convierte mensajes en registros (sin descartados; un pedido repetido por el mismo asesor en menos de 4 días cuenta una vez). */
+  function registros(msgs) {
+    var out = [], ultimos = {}, previo = {};
+    function limpiar(t) { return String(t).replace(/<[^>]*omitid[oa]>/gi, '').replace(/<se edit[oó] este mensaje\.?>/gi, '').replace(/\s+/g, ' ').trim(); }
+    function ficha(r) {
+      var p = precioDe(r.mensaje);
+      r.operacion = operacionDe(r.mensaje); r.inmueble = tiposDe(r.mensaje).join(', ') || 'Sin especificar';
+      r.zona = zonasDe(r.mensaje).join(', ') || 'Sin especificar'; r.precio = p ? (p.min ? p.min + '-' : '') + (p.max || '') : '';
+      return r;
+    }
+    msgs.forEach(function (m) {
+      var t = new Date(m.fecha + 'T' + m.hora), texto = limpiar(m.texto), ant = previo[m.autor];
+      var cerca = ant && (t - ant.t) <= 15 * 6e4;
+      previo[m.autor] = { t: t, texto: texto, reg: cerca ? ant.reg : null };
+      // Mensaje corto que completa el pedido anterior del mismo asesor ("presupuesto 40 mil", "en la puerta")
+      if (cerca && ant.reg && ant.reg.tipo === 'Solicitud' && texto.length < 140 && (precioDe(texto) || zonasDe(texto).length || tiposDe(texto).length) && !/(busco|solicito|necesito|requiero|tengo cliente)/i.test(norm(texto))) {
+        ant.reg.mensaje += ' / ' + texto; ficha(ant.reg); previo[m.autor].reg = ant.reg; return;
+      }
+      var tipo = clasificar(m);
+      if (tipo === 'Descartado') return;
+      if (tipo === 'Solicitud' && cerca && !ant.reg && ant.texto.length > 8 && ant.texto.length < 200) texto = ant.texto + ' / ' + texto; // contexto del mensaje anterior
+      if (tipo === 'Solicitud') {
+        var u = ultimos[m.autor];
+        if (u && (t - u.t) < 4 * 864e5 && parecido(u.texto, texto) > 0.6) return;
+        ultimos[m.autor] = { t: t, texto: texto };
+      }
+      var r = ficha({ fecha: m.fecha, mes: m.fecha.slice(0, 7), hora: m.hora, tipo: tipo, asesor: m.autor, mensaje: texto });
+      out.push(r); previo[m.autor].reg = r;
+    });
+    return out;
+  }
+  function parecido(a, b) {
+    var A = norm(a).split(' '), B = norm(b).split(' '), s = {}; A.forEach(function (w) { s[w] = 1; });
+    var c = B.filter(function (w) { return s[w]; }).length; return c / Math.max(A.length, B.length, 1);
+  }
+
+  /* ── 4. Inventario Novus (filas del Excel "Listado de inmuebles") ── */
+  function inventario(filas, agencia) {
+    var h = -1;
+    for (var i = 0; i < Math.min(filas.length, 30); i++) if (String(filas[i][0] || '').trim() === 'Código inmueble') { h = i; break; }
+    if (h < 0) return null;
+    var cab = filas[h].map(function (x) { return norm(x); });
+    function col(n) { return cab.indexOf(norm(n)); }
+    var c = { cod: col('Código inmueble'), agente: col('Agente'), ubic: col('Ubicación'), tit: col('Título'), tipo: col('Tipo inmueble'), op: col('Tipo operación'),
+      est: col('Estatus'), precio: col('Precio Captación ( USD $ )'), hab: col('Habitaciones'), ban: col('Baños'), est2: col('Puestos estacionamiento'),
+      area: col('Área construcción'), terr: col('Área terreno'), dir: col('Dirección detallada del inmueble'), fcap: col('Fecha captación'), excl: col('En exclusiva mercado') };
+    return filas.slice(h + 1).filter(function (r) { return r[c.cod] && r[c.tit]; }).map(function (r) {
+      return {
+        codigo: String(r[c.cod]), agencia: agencia, agente: String(r[c.agente] || ''), titulo: String(r[c.tit] || '').trim(), ubicacion: String(r[c.ubic] || ''),
+        direccion: String(r[c.dir] || ''), tipo: String(r[c.tipo] || ''), operacion: String(r[c.op] || ''), estatus: String(r[c.est] || ''),
+        precio: Number(r[c.precio]) || 0, hab: Number(r[c.hab]) || 0, banos: Number(r[c.ban]) || 0, puestos: Number(r[c.est2]) || 0,
+        area: Number(r[c.area]) || 0, terreno: Number(r[c.terr]) || 0, captacion: String(r[c.fcap] || ''), exclusiva: String(r[c.excl] || '')
+      };
+    });
+  }
+
+  /* ── 5. Matches: qué inmuebles activos sirven para cada pedido ── */
+  function prepararInm(x) {
+    if (x._z) return x;
+    var txt = x.titulo + ' ' + x.ubicacion.split(',')[0] + ' ' + x.direccion;
+    x._z = zonasDe(txt); x._cat = TIPO_NOVUS[norm(x.tipo)] || ''; return x;
+  }
+  function opcionesPara(sol, inv, max) {
+    var tipos = sol.inmueble && sol.inmueble !== 'Sin especificar' ? sol.inmueble.split(', ') : [];
+    var zonas = sol.zona && sol.zona !== 'Sin especificar' ? sol.zona.split(', ') : [];
+    var op = sol.operacion, p = precioDe(sol.mensaje), hab = habitacionesDe(sol.mensaje);
+    var RAROS = ['Galpón', 'Edificio', 'Posada/Hotel', 'Finca', 'Oficina', 'Habitación'];
+    var criterios = (tipos.length ? 1 : 0) + (zonas.length ? 1 : 0) + (p ? 1 : 0);
+    var suficiente = criterios >= 2 || (tipos.length && tipos.every(function (q) { return RAROS.indexOf(q) >= 0; }));
+    if (!suficiente) return [];
+    var res = [];
+    inv.forEach(function (x) {
+      if (x.estatus !== 'Activo' || !x.precio) return;
+      prepararInm(x);
+      if ((op === 'Venta' || op === 'Alquiler') && x.operacion && x.operacion !== op) return;
+      if (tipos.length && tipos.indexOf(x._cat) < 0) return;
+      var puntos = 0, motivos = [];
+      if (tipos.length) { puntos += 3; motivos.push(x._cat); }
+      if (zonas.length) {
+        var z = zonas.filter(function (q) { return x._z.indexOf(q) >= 0; });
+        if (!z.length) return;
+        puntos += 3; motivos.push(z.join(', '));
+      }
+      if (p) {
+        var esAlq = x.operacion === 'Alquiler', pv = x.precio;
+        if (p.max && pv > p.max * 1.12) return;
+        if (p.min && pv < p.min * 0.85) return;
+        if (p.max && !p.min && pv < p.max * (esAlq ? 0.4 : 0.35)) return;
+        puntos += 2 + (p.max ? 1 - Math.abs(p.max - pv) / p.max : 0); motivos.push('$' + Math.round(pv).toLocaleString('es-VE'));
+      }
+      if (hab) { if (x.hab && x.hab < hab) return; if (x.hab) { puntos += 1; motivos.push(x.hab + ' hab'); } }
+      res.push({ inm: x, puntos: puntos, motivos: motivos });
+    });
+    function fechaCap(x) { var m = String(x.captacion).match(/(\d{2})-(\d{2})-(\d{4})/); return m ? m[3] + m[2] + m[1] : ''; }
+    res.sort(function (a, b) { return (b.puntos - a.puntos) || (fechaCap(b.inm) > fechaCap(a.inm) ? 1 : -1); });
+    return res.slice(0, max || 8);
+  }
+
+  return { leer: leer, clasificar: clasificar, registros: registros, inventario: inventario, opcionesPara: opcionesPara,
+    zonasDe: zonasDe, tiposDe: tiposDe, operacionDe: operacionDe, precioDe: precioDe, norm: norm };
+})();
+
+</script>
 <script>
 /* ───────── Conexión con el servidor ───────── */
 var PUBLICAS = { app_usuarios: 1, app_login: 1, app_salir: 1 };
@@ -436,7 +706,7 @@ function api(fn) {
 }
 
 /* ───────── Estado ───────── */
-var E = { cfg: null, cfgVista: 'agentes', cfgAg: 'todas', ini: null, datos: null, cuadre: {}, vistaAnal: null, hojas: {}, tab: 'inicio', filtroNeg: 'todas', agNeg: 'todas', buscar: '', agCuadro: 'Avanti', agAnal: 'todas', abiertos: {} };
+var E = { chat: null, chatVista: 'pedidos', chatDias: '30', chatSolo: false, cfg: null, cfgVista: 'agentes', cfgAg: 'todas', ini: null, datos: null, cuadre: {}, vistaAnal: null, hojas: {}, tab: 'inicio', filtroNeg: 'todas', agNeg: 'todas', buscar: '', agCuadro: 'Avanti', agAnal: 'todas', abiertos: {} };
 
 /* ───────── Utilidades ───────── */
 var fmt = new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -563,6 +833,7 @@ function revisarCambios() {
   REVISANDO = true;
   api('app_version').then(function (v) {
     if (!E.datos || v.ver === E.datos.ver) { REVISANDO = false; return; }
+    if (E.chat) { E.chat = null; E.chatOpc = null; if (E.tab === 'chat') cargarChat(true); }
     var mes = $('#selMes').value, anio = Number($('#selAnio').value), n = ++PEDIDO;
     return api('app_mes', mes, anio, false).then(function (datos) {
       REVISANDO = false;
@@ -593,7 +864,7 @@ $('#tabs').addEventListener('click', function (ev) {
 
 function pintar() {
   if (!E.datos) return;
-  var f = { inicio: vInicio, negociaciones: vNegociaciones, cuadro: vCuadro, cobrar: vCobrar, cuadre: vCuadre, analisis: vAnalisis, flujo: vFlujo, config: vConfig }[E.tab];
+  var f = { inicio: vInicio, negociaciones: vNegociaciones, cuadro: vCuadro, cobrar: vCobrar, cuadre: vCuadre, analisis: vAnalisis, flujo: vFlujo, chat: vChat, config: vConfig }[E.tab];
   $('#vista').innerHTML = f();
   enlazar();
 }
@@ -1183,6 +1454,7 @@ function enlazar() {
   var nv = $('#btnNueva'); if (nv) nv.addEventListener('click', function () { abrirNeg(0); });
   if (E.tab === 'cuadre') enlazarCuadre();
   if (E.tab === 'config') enlazarConfig();
+  if (E.tab === 'chat') enlazarChat();
   $$('[data-entrega]').forEach(function (b) { b.addEventListener('click', function () { abrirEntrega(b.dataset.entrega); }); });
   $$('[data-saldo]').forEach(function (b) { b.addEventListener('click', function () { abrirSaldo(E.pendientes[Number(b.dataset.saldo)]); }); });
   $$('[data-agente]').forEach(function (el) { el.addEventListener('click', function () { E.vistaAnal = { tipo: 'agente', hoja: el.dataset.agente }; pintar(); window.scrollTo(0, 0); }); });
@@ -1379,6 +1651,157 @@ function abrirEntrega(persona) {
 }
 
 
+
+/* ───────── CHAT Y MATCHES ───────── */
+function nombreChat(a) { return String(a || '').replace(/\s*(re\/?max( avanti( ii)?)?|avanti( ii)?|asesores|remax|ai|digitel|comunity)\b/gi, '').replace(/\s+/g, ' ').trim() || a; }
+function cargarChat(forzar) {
+  if (E.chat && !forzar) return Promise.resolve(E.chat);
+  return api('app_chat').then(function (c) { E.chat = c; E.chatOpc = null; if (E.tab === 'chat') pintar(); return c; })
+    .catch(function (e) { E.chat = { error: e.message }; if (E.tab === 'chat') pintar(); });
+}
+function calcularMatches() {
+  if (E.chatOpc) return E.chatOpc;
+  var C = E.chat, inv = C.inventario || [];
+  var sols = (C.registros || []).filter(function (r) { return r.tipo === 'Solicitud'; }).sort(function (a, b) { return (b.fecha + b.hora) > (a.fecha + a.hora) ? 1 : -1; });
+  var porInm = {};
+  sols.forEach(function (s) {
+    s.opciones = CHAT.opcionesPara(s, inv, 8);
+    // Para "a quién avisar": solo si el inmueble está entre las mejores opciones del pedido y coincide en zona o precio
+    s.opciones.forEach(function (o) {
+      if (o.motivos.length < 2) return;
+      (porInm[o.inm.codigo] = porInm[o.inm.codigo] || { inm: o.inm, pedidos: [] }).pedidos.push(s);
+    });
+  });
+  // Captaciones de los últimos 45 días y a quién le pueden servir
+  var lim = new Date(Date.now() - 45 * 864e5);
+  function fcap(x) { var m = String(x.captacion || '').match(/(\d{2})-(\d{2})-(\d{4})/); return m ? new Date(+m[3], m[2] - 1, +m[1]) : null; }
+  var nuevas = inv.filter(function (x) { var f = fcap(x); return f && f >= lim; }).map(function (x) {
+    var p = porInm[x.codigo]; return { inm: x, fecha: fcap(x), pedidos: p ? p.pedidos.slice(0, 10) : [] };
+  }).sort(function (a, b) { return b.fecha - a.fecha; });
+  E.chatOpc = { sols: sols, nuevas: nuevas };
+  return E.chatOpc;
+}
+function vChat() {
+  var h = '<div class="barra-acc"><div><h2 style="margin:0">Chat y matches</h2><p class="sub" style="margin:2px 0 0">Lo que piden en el grupo y lo que tenemos activo en Novus.</p></div><button class="btn pri" data-cargar-chat>Cargar chat o inventario</button></div>';
+  if (!E.chat) { setTimeout(function () { cargarChat(); }, 0); return h + '<div class="grid g2"><div class="esqueleto"></div><div class="esqueleto"></div></div>'; }
+  if (E.chat.error) return h + '<div class="card aviso">No pude leer el chat: ' + esc(E.chat.error) + '</div>';
+  var C = E.chat, M = calcularMatches(), dias = Number(E.chatDias) || 30;
+  var lim = new Date(Date.now() - dias * 864e5).toISOString().slice(0, 10);
+  var sols = M.sols.filter(function (s) { return s.fecha >= lim; });
+  var conOpc = sols.filter(function (s) { return s.opciones.length; });
+  h += '<div class="grid g4">';
+  h += '<div class="card kpi"><div class="l">Pedidos (' + dias + ' días)</div><div class="v">' + sols.length + '</div></div>';
+  h += '<div class="card kpi"><div class="l">Con opciones nuestras</div><div class="v">' + conOpc.length + '</div></div>';
+  h += '<div class="card kpi"><div class="l">Inventario activo</div><div class="v">' + C.inventario.length + '</div><div class="muted" style="font-size:12px">' + (C.inventarioCargado ? 'cargado ' + esc(C.inventarioCargado) : 'sin cargar') + '</div></div>';
+  h += '<div class="card kpi"><div class="l">Último mensaje cargado</div><div class="v" style="font-size:16px">' + esc(C.ultimo || '—') + '</div></div>';
+  h += '</div><div style="height:12px"></div>';
+  if (!C.inventario.length) h += '<div class="aviso">Carga los <b>listados de inmuebles</b> de Novus para ver las opciones de cada pedido.</div>';
+  h += '<div class="barra-filtros">' + seg('chatVista', [['pedidos', 'Pedidos'], ['captaciones', 'Captaciones nuevas']]) + seg('chatDias', [['7', '7 días'], ['30', '30 días'], ['90', '90 días']]) + '</div>';
+  if ((E.chatVista || 'pedidos') === 'captaciones') return h + vCaptChat(M);
+  var lista = E.chatSolo ? conOpc : sols;
+  h += '<label class="muted" style="display:flex;gap:6px;align-items:center;font-size:13px;margin:0 0 10px"><input type="checkbox" id="chatSolo"' + (E.chatSolo ? ' checked' : '') + '> Solo los que tienen opciones</label>';
+  if (!lista.length) return h + '<div class="card vacio">No hay pedidos en este período.</div>';
+  h += '<div class="lista">';
+  lista.forEach(function (s, i) {
+    var k = 'sol' + s.fecha + s.hora + i, abierto = E.abiertos[k];
+    var chips = [s.operacion, s.inmueble, s.zona, s.precio ? '$' + s.precio : ''].filter(function (x) { return x && x !== 'Sin especificar'; });
+    h += '<div class="card" style="padding:12px 14px;margin-bottom:8px">';
+    h += '<div class="click" data-abrir="' + k + '" style="cursor:pointer"><div style="display:flex;justify-content:space-between;gap:10px"><b>' + esc(nombreChat(s.asesor)) + '</b><span class="muted" style="font-size:12px;white-space:nowrap">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + '</span></div>';
+    h += '<div style="font-size:13px;margin:4px 0">' + esc(s.mensaje.length > 220 && !abierto ? s.mensaje.slice(0, 220) + '…' : s.mensaje) + '</div>';
+    h += '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') +
+      (s.opciones.length ? '<span class="chip verde">' + (abierto ? '▾ ' : '▸ ') + s.opciones.length + ' opcion' + (s.opciones.length > 1 ? 'es' : '') + '</span>' : '<span class="chip muted">sin opciones</span>') + '</div></div>';
+    if (abierto && s.opciones.length) h += tablaOpciones(s.opciones);
+    h += '</div>';
+  });
+  return h + '</div>';
+}
+function tablaOpciones(ops) {
+  var h = '<div class="tabla-wrap" style="margin-top:10px"><table><thead><tr><th>Código</th><th>Inmueble</th><th class="d">Precio</th><th class="ocultar-movil">Captador</th><th class="ocultar-movil">Por qué</th></tr></thead><tbody>';
+  ops.forEach(function (o) {
+    var x = o.inm;
+    h += '<tr><td><b>' + esc(x.codigo) + '</b><div class="muted" style="font-size:11px">' + esc(x.agencia) + '</div></td><td>' + esc(x.titulo) + '<div class="muted" style="font-size:12px">' + esc(x.operacion) + (x.hab ? ' · ' + x.hab + ' hab' : '') + (x.area ? ' · ' + fmt0.format(x.area) + ' m²' : '') + '</div><div class="muted solo-movil" style="font-size:12px">' + esc(corto(x.agente)) + '</div></td>' +
+      '<td class="d num">' + d0(x.precio) + '</td><td class="ocultar-movil">' + esc(corto(x.agente)) + '</td><td class="ocultar-movil muted" style="font-size:12px">' + esc(o.motivos.join(' · ')) + '</td></tr>';
+  });
+  return h + '</tbody></table></div>';
+}
+function vCaptChat(M) {
+  var con = M.nuevas.filter(function (n) { return n.pedidos.length; });
+  var h = '<p class="muted" style="margin:0 0 10px;font-size:13px">Inmuebles captados en los últimos 45 días (Novus) que coinciden con pedidos del chat. Avisa a esos asesores.</p>';
+  if (!con.length) return h + '<div class="card vacio">Ninguna captación nueva coincide con los pedidos recientes.</div>';
+  con.forEach(function (n) {
+    var x = n.inm, quien = {};
+    n.pedidos.forEach(function (p) { quien[nombreChat(p.asesor)] = 1; });
+    h += '<div class="card" style="padding:12px 14px;margin-bottom:8px"><div style="display:flex;justify-content:space-between;gap:10px"><b>' + esc(x.titulo) + '</b><b class="num">' + d0(x.precio) + '</b></div>';
+    h += '<div class="muted" style="font-size:12px;margin:2px 0 6px">' + esc(x.codigo) + ' · ' + esc(x.agencia) + ' · ' + esc(corto(x.agente)) + ' · captado ' + esc(x.captacion) + '</div>';
+    h += '<div style="font-size:13px"><b>Avisar a:</b> ' + Object.keys(quien).map(esc).join(', ') + '</div>';
+    h += '<div class="muted" style="font-size:12px;margin-top:4px">' + n.pedidos.slice(0, 3).map(function (p) { return '“' + esc(p.mensaje.slice(0, 90)) + (p.mensaje.length > 90 ? '…' : '') + '” (' + esc(p.fecha.split('-').reverse().join('/')) + ')'; }).join('<br>') + '</div></div>';
+  });
+  return h;
+}
+/* Leer los archivos en el teléfono/computadora y mandar solo lo nuevo */
+var CARGA_CHAT = null;
+function cargarJSZip() {
+  if (window.JSZip) return Promise.resolve();
+  return new Promise(function (ok, mal) { var s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'; s.onload = ok; s.onerror = function () { mal(new Error('No pude abrir el .zip (sin conexión)')); }; document.head.appendChild(s); });
+}
+function leerArchivoChat(f) {
+  var n = f.name.toLowerCase();
+  if (/\.zip$/.test(n)) return cargarJSZip().then(function () { return JSZip.loadAsync(f); }).then(function (z) {
+    var txt = Object.keys(z.files).filter(function (k) { return /\.txt$/i.test(k) && !z.files[k].dir; })[0];
+    if (!txt) throw new Error(f.name + ': no tiene el .txt del chat');
+    return z.files[txt].async('string').then(function (t) { return { tipo: 'chat', texto: t, nombre: f.name }; });
+  });
+  if (/\.txt$/.test(n)) return f.text().then(function (t) { return { tipo: 'chat', texto: t, nombre: f.name }; });
+  return f.arrayBuffer().then(function (b) {
+    var wb = XLSX.read(b, { type: 'array' }), ws = wb.Sheets[wb.SheetNames[0]];
+    var filas = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+    var cab = filas.slice(0, 6).map(function (r) { return r.join(' '); }).join(' ');
+    var ag = /avanti ii/i.test(cab) || /avanti_ii|avanti ii/i.test(f.name) ? 'Avanti II' : 'Avanti';
+    var inv = CHAT.inventario(filas, ag);
+    if (!inv) throw new Error(f.name + ': no parece un listado de inmuebles de Novus');
+    return { tipo: 'inventario', agencia: ag, inv: inv, nombre: f.name };
+  });
+}
+function enlazarChat() {
+  $$('[data-cargar-chat]').forEach(function (b) { b.addEventListener('click', function () { CARGA_CHAT = null; $('#archChat').value = ''; $('#resChat').innerHTML = ''; $('#btnChatSubir').disabled = true; $('#modalChat').classList.add('on'); }); });
+  var solo = $('#chatSolo'); if (solo) solo.addEventListener('change', function () { E.chatSolo = solo.checked; pintar(); });
+}
+$('#archChat').addEventListener('change', function () {
+  var fs = Array.prototype.slice.call(this.files || []);
+  if (!fs.length) return;
+  $('#resChat').innerHTML = '<p class="muted">Leyendo…</p>'; $('#btnChatSubir').disabled = true;
+  var ultimo = (E.chat && E.chat.ultimo) || '';
+  Promise.all(fs.map(leerArchivoChat)).then(function (rs) {
+    var carga = { registros: [], inventario: {} }, h = '';
+    rs.forEach(function (r) {
+      if (r.tipo === 'inventario') {
+        carga.inventario[r.agencia] = r.inv;
+        h += '<p>🏠 <b>Inventario ' + esc(r.agencia) + '</b>: ' + r.inv.length + ' inmuebles (' + r.inv.filter(function (x) { return x.estatus === 'Activo'; }).length + ' activos).</p>';
+      } else {
+        var msgs = CHAT.leer(r.texto), nuevos = msgs.filter(function (m) { return (m.fecha + ' ' + m.hora) > ultimo; });
+        // Se incluye un poco antes del corte para que los pedidos en varios mensajes se entiendan completos
+        var regs = CHAT.registros(nuevos);
+        carga.registros = carga.registros.concat(regs);
+        var c = {}; regs.forEach(function (x) { c[x.tipo] = (c[x.tipo] || 0) + 1; });
+        h += '<p>💬 <b>Chat</b>: ' + msgs.length + ' mensajes, ' + nuevos.length + ' nuevos' + (ultimo ? ' (después del ' + esc(ultimo) + ')' : '') + ' → <b>' + (c['Solicitud'] || 0) + '</b> pedidos, ' + (c['Oferta/Publicación'] || 0) + ' ofertas, ' + (c['Captación'] || 0) + ' captaciones.</p>';
+      }
+    });
+    CARGA_CHAT = carga;
+    $('#resChat').innerHTML = h + '<p class="muted" style="font-size:12px">Los pedidos se reconocen por palabras clave; los saludos, avisos y preguntas sueltas no se guardan.</p>';
+    $('#btnChatSubir').disabled = !(carga.registros.length || Object.keys(carga.inventario).length);
+  }).catch(function (e) { $('#resChat').innerHTML = '<p class="aviso">' + esc(e.message || e) + '</p>'; });
+});
+$('#btnChatSubir').addEventListener('click', function () {
+  if (!CARGA_CHAT) return;
+  var b = this; b.disabled = true; cargando(true);
+  api('app_importarChat', CARGA_CHAT).then(function (r) {
+    cargando(false); $('#modalChat').classList.remove('on');
+    var inv = Object.keys(r.inventario).map(function (a) { return a + ' ' + r.inventario[a]; }).join(', ');
+    toast('Guardado: ' + r.nuevos + ' registros nuevos del chat' + (inv ? ' · inventario ' + inv : ''), 5000);
+    E.chat = null; E.chatOpc = null; cargarChat(true);
+  }).catch(function (e) { cargando(false); b.disabled = false; toast('No se guardó: ' + e.message, 6000); });
+});
+
 /* ───────── CONFIGURACIÓN ───────── */
 var NIVELES = [50, 60, 70, 80];
 function p100(x) { return x == null || x === '' ? '' : Math.round(x * 10000) / 100; }
@@ -1549,7 +1972,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-07T13:44:56.217Z';
+  var VERSION = '2026-11-07T14:01:06.067Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
