@@ -627,40 +627,66 @@ var CHAT = (function () {
     var txt = x.titulo + ' ' + x.ubicacion.split(',')[0] + ' ' + x.direccion;
     x._z = zonasDe(txt); x._cat = TIPO_NOVUS[norm(x.tipo)] || ''; return x;
   }
+  /* Devuelve opciones en tres niveles:
+   *  coincide  → misma zona, precio dentro del presupuesto (±12%) y habitaciones suficientes
+   *  parecida  → se pasa hasta 30% del presupuesto, o es de otra zona, o tiene menos habitaciones
+   *  cercana   → si casi no hay nada, "lo más cercano" aunque se aleje más
+   */
   function opcionesPara(sol, inv, max) {
     var tipos = sol.inmueble && sol.inmueble !== 'Sin especificar' ? sol.inmueble.split(', ') : [];
     var zonas = sol.zona && sol.zona !== 'Sin especificar' ? sol.zona.split(', ') : [];
     var op = sol.operacion, p = precioDe(sol.mensaje), hab = habitacionesDe(sol.mensaje);
     var RAROS = ['Galpón', 'Edificio', 'Posada/Hotel', 'Finca', 'Oficina', 'Habitación'];
     var criterios = (tipos.length ? 1 : 0) + (zonas.length ? 1 : 0) + (p ? 1 : 0);
-    var suficiente = criterios >= 2 || (tipos.length && tipos.every(function (q) { return RAROS.indexOf(q) >= 0; }));
-    if (!suficiente) return [];
-    var res = [];
+    if (!(criterios >= 2 || (tipos.length && tipos.every(function (q) { return RAROS.indexOf(q) >= 0; })))) return [];
+    function plata(n) { return '$' + Math.round(n).toLocaleString('es-VE'); }
+    function fechaCap(x) { var m = String(x.captacion).match(/(\d{2})-(\d{2})-(\d{4})/); return m ? m[3] + m[2] + m[1] : ''; }
+    var todos = [];
     inv.forEach(function (x) {
       if (x.estatus !== 'Activo' || !x.precio) return;
       prepararInm(x);
       if ((op === 'Venta' || op === 'Alquiler') && x.operacion && x.operacion !== op) return;
       if (tipos.length && tipos.indexOf(x._cat) < 0) return;
-      var puntos = 0, motivos = [];
-      if (tipos.length) { puntos += 3; motivos.push(x._cat); }
-      if (zonas.length) {
-        var z = zonas.filter(function (q) { return x._z.indexOf(q) >= 0; });
-        if (!z.length) return;
-        puntos += 3; motivos.push(z.join(', '));
-      }
+      var zonaEn = zonas.filter(function (q) { return x._z.indexOf(q) >= 0; });
+      var zonaOk = !zonas.length || zonaEn.length > 0;
+      var habOk = !hab || !x.hab || x.hab >= hab;
+      var pv = x.precio, desv = 0, sobre = 0;
       if (p) {
-        var esAlq = x.operacion === 'Alquiler', pv = x.precio;
-        if (p.max && pv > p.max * 1.12) return;
-        if (p.min && pv < p.min * 0.85) return;
-        if (p.max && !p.min && pv < p.max * (esAlq ? 0.4 : 0.35)) return;
-        puntos += 2 + (p.max ? 1 - Math.abs(p.max - pv) / p.max : 0); motivos.push('$' + Math.round(pv).toLocaleString('es-VE'));
+        if (p.max && pv > p.max) { desv = (pv - p.max) / p.max; sobre = pv - p.max; }
+        else if (p.min && pv < p.min) { desv = (p.min - pv) / p.min; sobre = pv - p.min; }
+        else if (p.max && !p.min && pv < p.max * 0.3) { desv = (p.max * 0.3 - pv) / p.max; sobre = pv - p.max; }
       }
-      if (hab) { if (x.hab && x.hab < hab) return; if (x.hab) { puntos += 1; motivos.push(x.hab + ' hab'); } }
-      res.push({ inm: x, puntos: puntos, motivos: motivos });
+      var motivos = [];
+      if (tipos.length) motivos.push(x._cat);
+      if (zonaEn.length) motivos.push(zonaEn.join(', '));
+      if (p && desv <= 0.12) motivos.push(plata(pv));
+      if (hab && x.hab && habOk) motivos.push(x.hab + ' hab');
+      var nivel, nota = '';
+      var notaPrecio = sobre > 0 ? '+' + plata(sobre) + ' sobre el presupuesto' : sobre < 0 ? plata(-sobre) + ' por debajo' : '';
+      if (zonaOk && desv <= 0.12 && habOk) nivel = 'coincide';
+      else if (zonaOk && desv <= 0.30 && habOk) { nivel = 'parecida'; nota = notaPrecio; }
+      else if (!zonaOk && desv <= 0.12 && habOk) { nivel = 'parecida'; nota = 'otra zona: ' + (x._z[0] || x.ubicacion.split(',')[0]); }
+      else if (zonaOk && desv <= 0.12 && !habOk) { nivel = 'parecida'; nota = 'tiene ' + x.hab + ' hab'; }
+      else { nivel = 'cercana'; nota = [notaPrecio, zonaOk ? '' : 'otra zona: ' + (x._z[0] || x.ubicacion.split(',')[0]), habOk ? '' : x.hab + ' hab'].filter(Boolean).join(' · '); }
+      var dist = desv + (zonaOk ? 0 : 0.6) + (habOk ? 0 : 0.25);
+      // dentro de lo que coincide: más cerca del presupuesto primero (no lo más barato)
+      var cerca = p && p.max ? Math.abs(p.max - pv) / p.max : 0;
+      todos.push({ inm: x, nivel: nivel, nota: nota, motivos: motivos, dist: dist, cerca: cerca, fecha: fechaCap(x) });
     });
-    function fechaCap(x) { var m = String(x.captacion).match(/(\d{2})-(\d{2})-(\d{4})/); return m ? m[3] + m[2] + m[1] : ''; }
-    res.sort(function (a, b) { return (b.puntos - a.puntos) || (fechaCap(b.inm) > fechaCap(a.inm) ? 1 : -1); });
-    return res.slice(0, max || 8);
+    function orden(a, b) { return (a.dist - b.dist) || (a.cerca - b.cerca) || (b.fecha > a.fecha ? 1 : -1); }
+    var co = todos.filter(function (o) { return o.nivel === 'coincide'; }).sort(orden);
+    var pa = todos.filter(function (o) { return o.nivel === 'parecida'; }).sort(orden);
+    var ce = todos.filter(function (o) { return o.nivel === 'cercana'; }).sort(orden);
+    max = max || 8;
+    var res = co.slice(0, max);
+    var paZona = pa.filter(function (o) { return o.dist < 0.6; }), paOtra = pa.filter(function (o) { return o.dist >= 0.6; }).slice(0, 3);
+    if (res.length < 4) res = res.concat(paZona.concat(paOtra).slice(0, 6 - res.length));
+    // Si pidió una zona y no hay nada ahí, lo más cercano en esa zona (aunque se pase del presupuesto)
+    if (zonas.length && !res.some(function (o) { return o.dist < 0.6; })) {
+      res = ce.filter(function (o) { return o.dist < 0.6 + 0.25 && o.motivos.length && o.inm._z.some(function (z) { return zonas.indexOf(z) >= 0; }); }).slice(0, 2).concat(res);
+    }
+    if (res.length < 2) res = res.concat(ce.filter(function (o) { return o.dist < 1.6 && res.indexOf(o) < 0; }).slice(0, 3 - res.length));
+    return res;
   }
 
   return { leer: leer, clasificar: clasificar, registros: registros, inventario: inventario, opcionesPara: opcionesPara,
@@ -1668,7 +1694,7 @@ function calcularMatches() {
     s.opciones = CHAT.opcionesPara(s, inv, 8);
     // Para "a quién avisar": solo si el inmueble está entre las mejores opciones del pedido y coincide en zona o precio
     s.opciones.forEach(function (o) {
-      if (o.motivos.length < 2) return;
+      if (o.nivel === 'cercana' || o.motivos.length < 2) return;
       (porInm[o.inm.codigo] = porInm[o.inm.codigo] || { inm: o.inm, pedidos: [] }).pedidos.push(s);
     });
   });
@@ -1688,7 +1714,7 @@ function vChat() {
   var C = E.chat, M = calcularMatches(), dias = Number(E.chatDias) || 30;
   var lim = new Date(Date.now() - dias * 864e5).toISOString().slice(0, 10);
   var sols = M.sols.filter(function (s) { return s.fecha >= lim; });
-  var conOpc = sols.filter(function (s) { return s.opciones.length; });
+  var conOpc = sols.filter(function (s) { return s.opciones.some(function (o) { return o.nivel !== 'cercana'; }); });
   h += '<div class="grid g4">';
   h += '<div class="card kpi"><div class="l">Pedidos (' + dias + ' días)</div><div class="v">' + sols.length + '</div></div>';
   h += '<div class="card kpi"><div class="l">Con opciones nuestras</div><div class="v">' + conOpc.length + '</div></div>';
@@ -1709,18 +1735,29 @@ function vChat() {
     h += '<div class="click" data-abrir="' + k + '" style="cursor:pointer"><div style="display:flex;justify-content:space-between;gap:10px"><b>' + esc(nombreChat(s.asesor)) + '</b><span class="muted" style="font-size:12px;white-space:nowrap">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + '</span></div>';
     h += '<div style="font-size:13px;margin:4px 0">' + esc(s.mensaje.length > 220 && !abierto ? s.mensaje.slice(0, 220) + '…' : s.mensaje) + '</div>';
     h += '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') +
-      (s.opciones.length ? '<span class="chip verde">' + (abierto ? '▾ ' : '▸ ') + s.opciones.length + ' opcion' + (s.opciones.length > 1 ? 'es' : '') + '</span>' : '<span class="chip muted">sin opciones</span>') + '</div></div>';
+      resumenOpciones(s.opciones, abierto) + '</div></div>';
     if (abierto && s.opciones.length) h += tablaOpciones(s.opciones);
     h += '</div>';
   });
   return h + '</div>';
 }
+var NIVEL_OPC = { coincide: ['verde', 'Coincide'], parecida: ['ambar', 'Parecida'], cercana: ['', 'Lo más cercano'] };
+function resumenOpciones(ops, abierto) {
+  if (!ops.length) return '<span class="chip muted">sin opciones</span>';
+  var c = { coincide: 0, parecida: 0, cercana: 0 }; ops.forEach(function (o) { c[o.nivel]++; });
+  var t = [];
+  if (c.coincide) t.push(c.coincide + ' coincide' + (c.coincide > 1 ? 'n' : ''));
+  if (c.parecida) t.push(c.parecida + ' parecida' + (c.parecida > 1 ? 's' : ''));
+  if (c.cercana) t.push(c.cercana + ' cercana' + (c.cercana > 1 ? 's' : ''));
+  return '<span class="chip ' + (c.coincide ? 'verde' : c.parecida ? 'ambar' : '') + '">' + (abierto ? '▾ ' : '▸ ') + t.join(' · ') + '</span>';
+}
 function tablaOpciones(ops) {
   var h = '<div class="tabla-wrap" style="margin-top:10px"><table><thead><tr><th>Código</th><th>Inmueble</th><th class="d">Precio</th><th class="ocultar-movil">Captador</th><th class="ocultar-movil">Por qué</th></tr></thead><tbody>';
   ops.forEach(function (o) {
-    var x = o.inm;
-    h += '<tr><td><b>' + esc(x.codigo) + '</b><div class="muted" style="font-size:11px">' + esc(x.agencia) + '</div></td><td>' + esc(x.titulo) + '<div class="muted" style="font-size:12px">' + esc(x.operacion) + (x.hab ? ' · ' + x.hab + ' hab' : '') + (x.area ? ' · ' + fmt0.format(x.area) + ' m²' : '') + '</div><div class="muted solo-movil" style="font-size:12px">' + esc(corto(x.agente)) + '</div></td>' +
-      '<td class="d num">' + d0(x.precio) + '</td><td class="ocultar-movil">' + esc(corto(x.agente)) + '</td><td class="ocultar-movil muted" style="font-size:12px">' + esc(o.motivos.join(' · ')) + '</td></tr>';
+    var x = o.inm, nv = NIVEL_OPC[o.nivel] || ['', ''];
+    var etiqueta = '<span class="chip ' + nv[0] + '" style="font-size:11px">' + nv[1] + '</span>' + (o.nota ? ' <span style="font-size:12px">' + esc(o.nota) + '</span>' : '');
+    h += '<tr><td><b>' + esc(x.codigo) + '</b><div class="muted" style="font-size:11px">' + esc(x.agencia) + '</div></td><td>' + esc(x.titulo) + '<div class="muted" style="font-size:12px">' + esc(x.operacion) + (x.hab ? ' · ' + x.hab + ' hab' : '') + (x.area ? ' · ' + fmt0.format(x.area) + ' m²' : '') + '</div><div class="solo-movil" style="margin-top:3px">' + etiqueta + '<div class="muted" style="font-size:12px">' + esc(corto(x.agente)) + '</div></div></td>' +
+      '<td class="d num">' + d0(x.precio) + '</td><td class="ocultar-movil">' + esc(corto(x.agente)) + '</td><td class="ocultar-movil" style="font-size:12px">' + etiqueta + '<div class="muted">' + esc(o.motivos.join(' · ')) + '</div></td></tr>';
   });
   return h + '</tbody></table></div>';
 }
@@ -1972,7 +2009,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-07T14:01:06.067Z';
+  var VERSION = '2026-11-07T14:09:56.023Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
