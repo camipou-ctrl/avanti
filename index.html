@@ -231,6 +231,8 @@
   .campo-t { width: 100%; min-width: 80px; border: 1px solid var(--linea); border-radius: 8px; padding: 6px 8px; background: #fff; font: inherit; }
   .btn.chico { padding: 4px 10px; font-size: 12px; }
   .solo-movil { display: none; }
+  .lista .chip, #cuerpoSaldo .chip { white-space: normal; max-width: 100%; }
+  #cuerpoSaldo { overflow-wrap: anywhere; }
   @media (max-width: 560px) { .solo-movil { display: block; } }
   .form textarea { min-height: 60px; resize: vertical; }
   .form .check { display: flex; align-items: center; gap: 8px; background: var(--rojo-bg); color: var(--rojo); padding: 8px 10px; border-radius: 9px; font-weight: 600; }
@@ -514,21 +516,29 @@ var CHAT = (function () {
   }
   /* Presupuesto: {min, max, texto}. Ignora metros, teléfonos y años. */
   function precioDe(t) {
-    var n = norm(t).replace(/(\d)\s+\.(\d{3})/g, '$1.$2').replace(/(\d)\s*mil\b/g, '$1.000').replace(/(\d)\s*k\b/g, '$1.000');
-    var nums = [], rx = /\$?\s?(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d{1,2})?)\s*(\$|usd|dolares|verdes|mts2?|m2|mt2|metros|mts|hab|habitaciones|cuartos|banos|años|anos|puestos)?/g, m;
+    var n = norm(t).replace(/(\d)\s+\.(\d{3})/g, '$1.$2').replace(/(\d)\s*mil\b/g, '$1.000').replace(/(\d)\s*k\b/g, '$1.000')
+      .replace(/(\d[\d.,]*)\s*(a|y|-|hasta)\s*(\d[\d.,]*)\s*(mts2?|m2|mt2|metros|mtrs)/g, ' ');
+    var nums = [], rx = /\$?\s?(\d{1,3}(?:[.,]\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(\$|usd|dolares|verdes|mts2?|m2|mt2|metros|mts|hab|habitaciones|cuartos|banos|años|anos|puestos)?/g, m;
     while ((m = rx.exec(n))) {
       var u = m[2] || '', crudo = m[1];
       if (/mts|m2|mt2|metros|hab|cuarto|bano|ano|puesto/.test(u)) continue;
-      var v = Number(crudo.replace(/[.,](\d{3})(?=$|[.,])/g, '$1').replace(/[.,](\d{3})(?=$|[.,])/g, '$1').replace(',', '.'));
+      var v = Number(crudo.replace(/,\d{1,2}$/, '').replace(/[.,](\d{3})(?=$|[.,])/g, '$1').replace(/[.,](\d{3})(?=$|[.,])/g, '$1').replace(',', '.'));
       if (!isFinite(v) || v < 80 || v > 5000000) continue;
       if (/^\d{7,}$/.test(crudo)) continue; // teléfono
       if (v >= 1900 && v <= 2035 && !/\$|usd/.test(u) && !/\./.test(crudo)) continue; // año
       nums.push({ v: v, conMoneda: /\$|usd|dolar|verde/.test(u) || /\$/.test(m[0]) });
     }
     if (!nums.length) return null;
-    var entre = n.match(/entre\s+\$?\s?([\d.,]+)\s*\$?\s*(?:y|a|-)\s*\$?\s?([\d.,]+)/);
+    var conM = nums.filter(function (x) { return x.conMoneda; });
+    if (conM.length && !nums[0].conMoneda) nums = conM.concat(nums.filter(function (x) { return !x.conMoneda; }));
+    var entre = n.match(/(?:entre|de|desde)\s+\$?\s?([\d.,]+)\s*\$?\s*(?:y|a|-)\s*\$?\s?([\d.,]+)/);
     var max = nums[0].v, min = 0;
-    if (entre && nums.length > 1) { min = nums[0].v; max = nums[1].v; if (min > max) { var x = min; min = max; max = x; } }
+    function num(t) { return Number(String(t).replace(/,\d{1,2}$/, '').replace(/[.,](?=\d{3})/g, '')); }
+    if (entre) {
+      var e1 = num(entre[1]), e2 = num(entre[2]);
+      if (e1 < 1000 && e2 >= 1000 && e1 * 1000 <= e2 * 1.5) e1 *= 1000; // "entre 45 y 59 mil"
+      if (e1 && e2 && !/m2|mts|metros/.test(n.slice(entre.index, entre.index + entre[0].length + 6))) { min = Math.min(e1, e2); max = Math.max(e1, e2); return { min: min, max: max }; }
+    }
     else if (/\b(desde|minimo|a partir de)\b/.test(n) && !/\bhasta\b/.test(n)) { min = nums[0].v; max = 0; }
     return { min: min, max: max };
   }
@@ -1721,7 +1731,7 @@ function vChat() {
   h += '<div class="card kpi"><div class="l">Inventario activo</div><div class="v">' + C.inventario.length + '</div><div class="muted" style="font-size:12px">' + (C.inventarioCargado ? 'cargado ' + esc(C.inventarioCargado) : 'sin cargar') + '</div></div>';
   h += '<div class="card kpi"><div class="l">Último mensaje cargado</div><div class="v" style="font-size:16px">' + esc(C.ultimo || '—') + '</div></div>';
   h += '</div><div style="height:12px"></div>';
-  if (!C.inventario.length) h += '<div class="aviso">Carga los <b>listados de inmuebles</b> de Novus para ver las opciones de cada pedido.</div>';
+  if (!C.inventario.length) h += '<div class="card" style="border:2px solid var(--ambar);margin-bottom:12px"><b>Falta el inventario de Novus.</b> Sin los listados de inmuebles no hay con qué comparar los pedidos.<div style="margin-top:8px"><button class="btn pri" data-cargar-chat>Cargar los listados de Avanti y Avanti II</button></div><div class="muted" style="font-size:12px;margin-top:6px">Son los Excel "Listado de inmuebles" que bajas de Novus. Desde la computadora es más fácil.</div></div>';
   h += '<div class="barra-filtros">' + seg('chatVista', [['pedidos', 'Pedidos'], ['captaciones', 'Captaciones nuevas']]) + seg('chatDias', [['7', '7 días'], ['30', '30 días'], ['90', '90 días']]) + '</div>';
   if ((E.chatVista || 'pedidos') === 'captaciones') return h + vCaptChat(M);
   var lista = E.chatSolo ? conOpc : sols;
@@ -1729,14 +1739,13 @@ function vChat() {
   if (!lista.length) return h + '<div class="card vacio">No hay pedidos en este período.</div>';
   h += '<div class="lista">';
   lista.forEach(function (s, i) {
-    var k = 'sol' + s.fecha + s.hora + i, abierto = E.abiertos[k];
+    var k = 'sol' + i, abierto = false;
     var chips = [s.operacion, s.inmueble, s.zona, s.precio ? '$' + s.precio : ''].filter(function (x) { return x && x !== 'Sin especificar'; });
     h += '<div class="card" style="padding:12px 14px;margin-bottom:8px">';
-    h += '<div class="click" data-abrir="' + k + '" style="cursor:pointer"><div style="display:flex;justify-content:space-between;gap:10px"><b>' + esc(nombreChat(s.asesor)) + '</b><span class="muted" style="font-size:12px;white-space:nowrap">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + '</span></div>';
+    h += '<div class="click" data-pedido="' + M.sols.indexOf(s) + '" style="cursor:pointer"><div style="display:flex;justify-content:space-between;gap:10px"><b>' + esc(nombreChat(s.asesor)) + '</b><span class="muted" style="font-size:12px;white-space:nowrap">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + '</span></div>';
     h += '<div style="font-size:13px;margin:4px 0">' + esc(s.mensaje.length > 220 && !abierto ? s.mensaje.slice(0, 220) + '…' : s.mensaje) + '</div>';
     h += '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') +
       resumenOpciones(s.opciones, abierto) + '</div></div>';
-    if (abierto && s.opciones.length) h += tablaOpciones(s.opciones);
     h += '</div>';
   });
   return h + '</div>';
@@ -1749,7 +1758,40 @@ function resumenOpciones(ops, abierto) {
   if (c.coincide) t.push(c.coincide + ' coincide' + (c.coincide > 1 ? 'n' : ''));
   if (c.parecida) t.push(c.parecida + ' parecida' + (c.parecida > 1 ? 's' : ''));
   if (c.cercana) t.push(c.cercana + ' cercana' + (c.cercana > 1 ? 's' : ''));
-  return '<span class="chip ' + (c.coincide ? 'verde' : c.parecida ? 'ambar' : '') + '">' + (abierto ? '▾ ' : '▸ ') + t.join(' · ') + '</span>';
+  return '<span class="chip ' + (c.coincide ? 'verde' : c.parecida ? 'ambar' : '') + '">' + t.join(' · ') + ' ›</span>';
+}
+/* Detalle de un pedido: sus opciones en tarjetas (título, precio, ubicación, código y captador) */
+function abrirPedido(idx) {
+  var s = calcularMatches().sols[idx]; if (!s) return;
+  var chips = [s.operacion, s.inmueble, s.zona, s.precio ? '$' + s.precio : ''].filter(function (x) { return x && x !== 'Sin especificar'; });
+  $('#tituloSaldo').textContent = 'Pedido de ' + nombreChat(s.asesor);
+  var h = '<div class="muted" style="font-size:12px">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + '</div>';
+  h += '<div style="margin:6px 0 8px">' + esc(s.mensaje) + '</div>';
+  h += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') + '</div>';
+  if (!E.chat.inventario.length) h += '<div class="aviso">Falta cargar el inventario de Novus para buscar opciones.</div>';
+  else if (!s.opciones.length) h += '<div class="aviso">No encontré opciones. ' + (chips.length < 2 ? 'El pedido dice muy poco (hace falta al menos tipo y zona, o tipo y presupuesto).' : 'No hay nada activo de ese tipo y operación.') + '</div>';
+  else {
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b>' + s.opciones.length + ' opciones</b><button class="btn chico" id="copiarOpc">Copiar para WhatsApp</button></div>';
+    s.opciones.forEach(function (o) {
+      var x = o.inm, nv = NIVEL_OPC[o.nivel] || ['', ''];
+      var ubic = [x.ubicacion.split(',')[0], x.direccion].filter(Boolean).join(' · ');
+      h += '<div style="border:1px solid var(--linea);border-radius:12px;padding:10px 12px;margin-bottom:8px">';
+      h += '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><b>' + esc(x.titulo) + '</b><b class="num" style="white-space:nowrap;font-size:16px">' + d0(x.precio) + '</b></div>';
+      h += '<div class="muted" style="font-size:12px;margin:3px 0">📍 ' + esc(ubic.slice(0, 140)) + '</div>';
+      h += '<div style="font-size:13px">Código <b>' + esc(x.codigo) + '</b> · ' + esc(x.agencia) + ' · Captador: <b>' + esc(corto(x.agente)) + '</b></div>';
+      h += '<div class="muted" style="font-size:12px">' + esc(x.operacion) + (x.hab ? ' · ' + x.hab + ' hab' : '') + (x.banos ? ' · ' + x.banos + ' baños' : '') + (x.area ? ' · ' + fmt0.format(x.area) + ' m²' : '') + (x.terreno ? ' · terreno ' + fmt0.format(x.terreno) + ' m²' : '') + '</div>';
+      h += '<div style="margin-top:5px"><span class="chip ' + nv[0] + '" style="font-size:11px">' + nv[1] + '</span>' + (o.nota ? ' <span style="font-size:12px">' + esc(o.nota) + '</span>' : '') + '</div>';
+      h += '</div>';
+    });
+  }
+  h += '<div class="acciones"><button class="btn" data-cerrar>Cerrar</button></div>';
+  $('#cuerpoSaldo').innerHTML = h;
+  $('#modalSaldo').classList.add('on');
+  var cp = $('#copiarOpc');
+  if (cp) cp.addEventListener('click', function () {
+    var txt = 'Opciones para tu pedido:\n' + s.opciones.map(function (o) { var x = o.inm; return '• ' + x.titulo + ' – $' + fmt0.format(x.precio) + ' – Cód. ' + x.codigo + ' (' + corto(x.agente) + ')'; }).join('\n');
+    (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function () { toast('Copiado'); }).catch(function () { toast('No se pudo copiar'); });
+  });
 }
 function tablaOpciones(ops) {
   var h = '<div class="tabla-wrap" style="margin-top:10px"><table><thead><tr><th>Código</th><th>Inmueble</th><th class="d">Precio</th><th class="ocultar-movil">Captador</th><th class="ocultar-movil">Por qué</th></tr></thead><tbody>';
@@ -1802,6 +1844,7 @@ function leerArchivoChat(f) {
 function enlazarChat() {
   $$('[data-cargar-chat]').forEach(function (b) { b.addEventListener('click', function () { CARGA_CHAT = null; $('#archChat').value = ''; $('#resChat').innerHTML = ''; $('#btnChatSubir').disabled = true; $('#modalChat').classList.add('on'); }); });
   var solo = $('#chatSolo'); if (solo) solo.addEventListener('change', function () { E.chatSolo = solo.checked; pintar(); });
+  $$('[data-pedido]').forEach(function (el) { el.addEventListener('click', function () { abrirPedido(Number(el.dataset.pedido)); }); });
 }
 $('#archChat').addEventListener('change', function () {
   var fs = Array.prototype.slice.call(this.files || []);
@@ -2009,7 +2052,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-07T14:24:00.279Z';
+  var VERSION = '2026-11-07T14:30:10.009Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
