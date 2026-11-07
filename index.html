@@ -555,6 +555,29 @@ function cargarMes(cambioMes, forzar) {
   });
 }
 
+/* Si alguien importa, guarda o edita, los demás reciben los datos nuevos solos (revisa cada 60 s y al volver a la app) */
+var REVISANDO = false;
+function revisarCambios() {
+  if (REVISANDO || document.visibilityState !== 'visible' || !E.datos || !E.datos.ver || $$('.modal.on').length) return;
+  if (!leerToken() && !window.API_PRUEBA) return;
+  REVISANDO = true;
+  api('app_version').then(function (v) {
+    if (!E.datos || v.ver === E.datos.ver) { REVISANDO = false; return; }
+    var mes = $('#selMes').value, anio = Number($('#selAnio').value), n = ++PEDIDO;
+    return api('app_mes', mes, anio, false).then(function (datos) {
+      REVISANDO = false;
+      guardarLocal(claveLocal(mes, anio), datos);
+      if (n !== PEDIDO) return;
+      var activo = document.activeElement;
+      if ($$('.modal.on').length || (activo && /INPUT|TEXTAREA|SELECT/.test(activo.tagName) && $('#vista').contains(activo))) { E.datos = datos; return; }
+      mostrarDatos(datos, true);
+      toast('Datos actualizados');
+    });
+  }).catch(function () { REVISANDO = false; });
+}
+setInterval(revisarCambios, 60000);
+document.addEventListener('visibilitychange', revisarCambios);
+
 function recordarMes() { guardarLocal('remax_mesSel', { mes: $('#selMes').value, anio: Number($('#selAnio').value) }); }
 $('#selMes').addEventListener('change', function () { recordarMes(); cargarMes(true); });
 $('#selAnio').addEventListener('change', function () { recordarMes(); cargarMes(true); });
@@ -1526,7 +1549,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-07T12:50:00.508Z';
+  var VERSION = '2026-11-07T13:44:56.217Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
