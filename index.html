@@ -1062,7 +1062,7 @@ function vCuadro() {
   h += '</tbody></table></div></div>';
 
   h += '<div style="height:16px"></div><div class="grid g2"><div class="card"><h3>Distribución</h3>';
-  [['Comisión bruta', a.cb], ['Regalía RE/MAX (5%)', -a.regalia], ['Comisión agentes', -a.comisionAgentes], ['Coordinación', -a.coordinacion], ['Broker', -a.broker], ['1% coordinador', -a.unoPct]].forEach(function (x) {
+  [['Comisión bruta', a.cb], ['Regalía RE/MAX (5%)', -a.regalia], ['Comisión agentes', -a.comisionAgentes], ['Coordinación', -a.coordinacion], ['Broker', -a.broker], ['1% coordinador', -a.unoPct]].concat(a.unoExtra ? [['1% ' + ((D.cuadro.distribucion || {}).extra || {}).persona, -a.unoExtra]] : []).forEach(function (x) {
     h += '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f0f2f6"><span>' + x[0] + '</span><span class="num">' + d(x[1]) + '</span></div>';
   });
   h += '<div style="display:flex;justify-content:space-between;padding:8px 0 0;font-weight:700"><span>Ingreso neto oficina</span><span class="num">' + d(a.netoOficina) + '</span></div><div class="muted" style="font-size:12px;margin-top:4px">Ya descuenta el 20% del IVA de la regalía que paga la oficina.</div></div>';
@@ -1105,9 +1105,9 @@ function hojaDistribucion(n, a) {
   var f = n.filas, r0 = f[0], ag = a.agencia;
   function suma(k) { return f.reduce(function (s, r) { return s + (r[k] || 0); }, 0); }
   var cb = suma('punta'), reg = suma('regalia'), dist = suma('dist'), comAg = suma('comAg'), ivaAg = suma('ivaAg'), spiff = suma('spiff');
-  var coord = suma('coord'), broker = suma('broker'), uno = suma('unoPct');
+  var coord = suma('coord'), broker = suma('broker'), uno = suma('unoPct'), extra = suma('unoExtra');
   var ivaReg = reg * P.iva, ivaOf = Math.max(ivaReg - ivaAg, 0), neta = cb - reg - ivaOf;
-  var cancelado = comAg + coord + broker + uno, bruto = dist - cancelado, netoAg = bruto - ivaOf;
+  var cancelado = comAg + coord + broker + uno + extra, bruto = dist - cancelado, netoAg = bruto - ivaOf;
   function p2(x) { return fmt.format((x || 0) * 100) + '%'; }
   function porDist(x) { return dist ? p2(x / dist) : ''; }
   function fila(t, pc, v, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + t + '</td><td class="d">' + (pc || '') + '</td><td class="d">' + (v === '' ? '' : fmt.format(v || 0)) + '</td></tr>'; }
@@ -1129,6 +1129,7 @@ function hojaDistribucion(n, a) {
   h += fila('BROKER ' + esc((P.broker[ag] || '').toUpperCase()), porDist(broker), broker);
   h += fila('COORDINACIÓN ' + esc((P.coord[ag] || '').toUpperCase()), porDist(coord), coord);
   h += fila('COORD. ' + esc((P.uno[ag] || '').toUpperCase()), porDist(uno), uno);
+  if (extra) h += fila('COORD. ' + esc(((P.extra || {}).persona || '').toUpperCase()), porDist(extra), extra);
   h += '</tbody></table>';
 
   h += '<div class="dist-sec">PAGO DE COMISIONES INDIVIDUALES</div>';
@@ -1161,22 +1162,22 @@ function hojaDistribucion(n, a) {
 
 /* Resumen Avanti / Avanti II para imprimir: todas las columnas, horizontal, máximo 2 páginas */
 function vResumenImpr(a) {
-  var D = E.datos, f = a.resumen, esII = a.agencia === 'Avanti II';
+  var D = E.datos, f = a.resumen, esII = a.agencia === 'Avanti II', hayExtra = f.some(function (r) { return r.unoExtra; });
   var h = '<div class="barra-acc no-imprimir"><button class="btn" data-volver-cuadro>← Volver</button><span class="muted" style="font-size:13px">Sale en horizontal; si no cabe en una hoja, se reparte en dos.</span><button class="btn pri" data-imprimir-resumen>Imprimir</button></div>';
   h += '<div class="res-wrap"><div class="hoja-res" id="hojaResumen">';
   h += '<div class="res-tit"><b>RESUMEN ' + esc(a.agencia.toUpperCase()) + '</b><span>' + esc(D.mes) + ' ' + D.anio + '</span></div>';
-  var cols = ['INDEX', 'NRO NEG.', 'CAPTADOR', 'COLOCADOR', 'NVL', 'INMUEBLE', 'TRANSACCIÓN', 'AGENCIA', 'DESCRIPCIÓN', 'MONTO OPERACIÓN', 'MONTO COMISIÓN', 'MONTO DE LA PUNTA', '5% REGALÍA', 'COMISIÓN A DIST.', 'CIERRE', 'COD.', '% NIVEL', '% COOR.', '%Coord Broker', esII ? '% Andrea' : '% Roman', 'Total'];
+  var cols = ['INDEX', 'NRO NEG.', 'CAPTADOR', 'COLOCADOR', 'NVL', 'INMUEBLE', 'TRANSACCIÓN', 'AGENCIA', 'DESCRIPCIÓN', 'MONTO OPERACIÓN', 'MONTO COMISIÓN', 'MONTO DE LA PUNTA', '5% REGALÍA', 'COMISIÓN A DIST.', 'CIERRE', 'COD.', '% NIVEL', '% COOR.', '%Coord Broker', esII ? '% Andrea' : '% Roman'].concat(hayExtra ? ['% ' + ((D.cuadro.distribucion || {}).extra || {}).persona] : []).concat(['Total']);
   h += '<table><thead><tr>' + cols.map(function (c, i) { return '<th' + (i >= 9 && i !== 14 && i !== 15 ? ' class="d"' : '') + '>' + c + '</th>'; }).join('') + '</tr></thead><tbody>';
-  var idx = 0, ant = null, t = { monto: 0, punta: 0, regalia: 0, dist: 0, coord: 0, broker: 0, uno: 0, total: 0 }, vistos = {};
+  var idx = 0, ant = null, t = { monto: 0, punta: 0, regalia: 0, dist: 0, coord: 0, broker: 0, uno: 0, extra: 0, total: 0 }, vistos = {};
   f.forEach(function (r) {
     var nuevo = r.numero !== ant; ant = r.numero; if (nuevo) idx++;
     if (!vistos[r.codigo + '|' + r.numero]) { vistos[r.codigo + '|' + r.numero] = 1; t.monto += r.monto; }
-    t.punta += r.punta; t.regalia += r.regalia; t.dist += r.dist; t.coord += r.coord; t.broker += r.broker; t.uno += r.unoPct; t.total += r.total;
+    t.punta += r.punta; t.regalia += r.regalia; t.dist += r.dist; t.coord += r.coord; t.broker += r.broker; t.uno += r.unoPct; t.extra += r.unoExtra || 0; t.total += r.total;
     h += '<tr class="' + (nuevo ? 'nuevo' : '') + '"><td>' + (nuevo ? idx : '') + '</td><td>' + r.numero + '</td><td class="nom">' + esc(r.captador) + '</td><td class="nom">' + esc(r.colocador) + '</td><td>' + pct(r.nivel) + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.operacion) + '</td><td>' + esc(r.agencia) + '</td><td class="des">' + esc(r.descripcion) + (r.sinReparto ? ' (sin reparto)' : '') + '</td>' +
       '<td class="d">' + fmt.format(r.monto) + '</td><td class="d">' + fmt.format(r.comision) + '</td><td class="d">' + fmt.format(r.punta) + '</td><td class="d">' + fmt.format(r.regalia) + '</td><td class="d">' + fmt.format(r.dist) + '</td>' +
-      '<td>' + esc(r.cierre) + '</td><td>' + esc(r.codigo) + '</td><td class="d">' + fmt.format(r.pctCoord * 100) + '%</td><td class="d">' + fmt.format(r.coord) + '</td><td class="d">' + fmt.format(r.broker) + '</td><td class="d">' + fmt.format(r.unoPct) + '</td><td class="d"><b>' + fmt.format(r.total) + '</b></td></tr>';
+      '<td>' + esc(r.cierre) + '</td><td>' + esc(r.codigo) + '</td><td class="d">' + fmt.format(r.pctCoord * 100) + '%</td><td class="d">' + fmt.format(r.coord) + '</td><td class="d">' + fmt.format(r.broker) + '</td><td class="d">' + fmt.format(r.unoPct) + '</td>' + (hayExtra ? '<td class="d">' + fmt.format(r.unoExtra || 0) + '</td>' : '') + '<td class="d"><b>' + fmt.format(r.total) + '</b></td></tr>';
   });
-  h += '<tr class="tot"><td colspan="9" class="d">Total</td><td class="d">' + fmt.format(t.monto) + '</td><td></td><td class="d">' + fmt.format(t.punta) + '</td><td class="d">' + fmt.format(t.regalia) + '</td><td class="d">' + fmt.format(t.dist) + '</td><td></td><td></td><td></td><td class="d">' + fmt.format(t.coord) + '</td><td class="d">' + fmt.format(t.broker) + '</td><td class="d">' + fmt.format(t.uno) + '</td><td class="d">' + fmt.format(t.total) + '</td></tr>';
+  h += '<tr class="tot"><td colspan="9" class="d">Total</td><td class="d">' + fmt.format(t.monto) + '</td><td></td><td class="d">' + fmt.format(t.punta) + '</td><td class="d">' + fmt.format(t.regalia) + '</td><td class="d">' + fmt.format(t.dist) + '</td><td></td><td></td><td></td><td class="d">' + fmt.format(t.coord) + '</td><td class="d">' + fmt.format(t.broker) + '</td><td class="d">' + fmt.format(t.uno) + '</td>' + (hayExtra ? '<td class="d">' + fmt.format(t.extra) + '</td>' : '') + '<td class="d">' + fmt.format(t.total) + '</td></tr>';
   h += '</tbody></table></div></div>';
   return h;
 }
@@ -2052,7 +2053,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-07T14:30:10.009Z';
+  var VERSION = '2026-11-09T16:17:44.560Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
