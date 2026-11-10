@@ -1043,7 +1043,8 @@ function vCuadro() {
   if (E.vistaCuadro === 'dist') return vDistribucion(a);
   var h = '<h2>Cuadro · ' + periodo() + '</h2><p class="sub">Lo que se le paga a cada agente y lo que queda para la oficina, según el listado del sistema.</p>';
   h += '<div class="barra-filtros">' + seg('agCuadro', [['Avanti', 'Avanti'], ['Avanti II', 'Avanti II']]) + (a && a.resumen.length && !esAnio() ? '<button class="btn" data-dist>Cuadro de distribución</button><button class="btn pri" data-resumen>Imprimir Resumen ' + esc(E.agCuadro) + '</button>' : '') + '</div>';
-  if (!a || !a.agentes.length) return h + '<div class="card vacio">No hay transacciones de ' + E.agCuadro + ' en ' + periodo() + '. Importa el listado del sistema.</div>';
+  var prov = vProvisionales();
+  if (!a || !a.agentes.length) return h + '<div class="card vacio">No hay transacciones de ' + E.agCuadro + ' en ' + periodo() + ' en el sistema. Importa el listado de Novus.</div>' + prov;
   h += '<div class="grid g4">';
   h += '<div class="card kpi"><div class="l">Comisión bruta</div><div class="v num">' + d(a.cb) + '</div><div class="muted" style="font-size:12px">' + a.transacciones + ' transacciones</div></div>';
   h += '<div class="card kpi"><div class="l">A pagar a agentes</div><div class="v num">' + d(a.totalCancelar) + '</div></div>';
@@ -1061,6 +1062,7 @@ function vCuadro() {
   h += '<tr class="total"><td>Total</td><td></td><td class="d ocultar-movil"></td><td class="d num">' + d(a.cb) + '</td><td class="d num ocultar-movil">' + d(a.comisionAgentes) + '</td><td class="d num ocultar-movil">−' + d(a.ivaAgentes) + '</td><td class="d num ocultar-movil">' + d(a.spiff) + '</td><td class="d num">' + d(a.totalCancelar) + '</td></tr>';
   h += '</tbody></table></div></div>';
 
+  h += prov;
   h += '<div style="height:16px"></div><div class="grid g2"><div class="card"><h3>Distribución</h3>';
   [['Comisión bruta', a.cb], ['Regalía RE/MAX (5%)', -a.regalia], ['Comisión agentes', -a.comisionAgentes], ['Coordinación', -a.coordinacion], ['Broker', -a.broker], ['1% coordinador', -a.unoPct]].concat(a.unoExtra ? [['1% ' + ((D.cuadro.distribucion || {}).extra || {}).persona, -a.unoExtra]] : []).forEach(function (x) {
     h += '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f0f2f6"><span>' + x[0] + '</span><span class="num">' + d(x[1]) + '</span></div>';
@@ -1761,6 +1763,26 @@ function resumenOpciones(ops, abierto) {
   if (c.cercana) t.push(c.cercana + ' cercana' + (c.cercana > 1 ? 's' : ''));
   return '<span class="chip ' + (c.coincide ? 'verde' : c.parecida ? 'ambar' : '') + '">' + t.join(' · ') + ' ›</span>';
 }
+/* Cobradas que todavía no están en el listado del sistema (reparto provisional, no suma en los totales) */
+function vProvisionales() {
+  var P = (E.datos.cuadro.provisionales || {}), lista = P[E.agCuadro] || [];
+  if (P.error) return '<div class="aviso" style="margin-top:12px">No pude calcular las cobradas sin sistema: ' + esc(P.error) + '</div>';
+  if (!lista.length) return '';
+  var t = { punta: 0, cancelar: 0, coord: 0, broker: 0, uno: 0, neto: 0 };
+  lista.forEach(function (x) { t.punta += x.punta; t.cancelar += x.cancelar; t.coord += x.coord; t.broker += x.broker; t.uno += x.unoPct + x.unoExtra; t.neto += x.neto; });
+  var h = '<div style="height:16px"></div><div class="card" style="border:2px dashed var(--ambar)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0">Cobradas que aún no están en el sistema <span class="chip ambar">provisional</span></h3><span class="muted" style="font-size:12px">' + lista.length + ' punta' + (lista.length > 1 ? 's' : '') + '</span></div>';
+  h += '<p class="muted" style="font-size:12px;margin:4px 0 10px">Están marcadas como pagadas en Negociaciones, pero Novus todavía no las trae. Su reparto se calcula con los mismos porcentajes y el último nivel del agente. <b>No suman</b> en los totales ni en las entregas al staff: pasan al cuadro normal cuando importes el listado.</p>';
+  h += '<div class="tabla-wrap"><table><thead><tr><th>Agente</th><th class="ocultar-movil">Negociación</th><th class="d">Nivel</th><th class="d">Punta</th><th class="d ocultar-movil">Staff</th><th class="d">A pagar</th></tr></thead><tbody>';
+  lista.forEach(function (x) {
+    h += '<tr><td><b>' + esc(corto(x.agente)) + '</b><div class="muted" style="font-size:12px">' + esc(x.rol) + (esAnio() ? ' · ' + esc(x.mes) : '') + '</div><div class="muted solo-movil" style="font-size:12px">' + esc(x.operacion) + ' · ' + esc(x.ubicacion) + '</div></td>' +
+      '<td class="ocultar-movil" style="font-size:13px">' + esc(x.operacion) + ' · ' + esc(x.tipo) + ' · ' + esc(x.ubicacion) + '<div class="muted" style="font-size:12px">' + esc(corto(x.captador)) + (x.colocador !== x.captador ? ' / ' + esc(corto(x.colocador)) : '') + ' · pagado ' + d(x.pagado) + (x.fechaPago ? ' el ' + esc(x.fechaPago) : '') + '</div></td>' +
+      '<td class="d">' + (x.nivel ? pct(x.nivel) : '<span class="chip ambar">?</span>') + '</td><td class="d num">' + d(x.punta) + '</td><td class="d num ocultar-movil">' + d(x.coord + x.broker + x.unoPct + x.unoExtra) + '</td><td class="d num"><b>' + d(x.cancelar) + '</b></td></tr>';
+  });
+  h += '<tr class="total"><td>Total</td><td class="ocultar-movil"></td><td></td><td class="d num">' + d(t.punta) + '</td><td class="d num ocultar-movil">' + d(t.coord + t.broker + t.uno) + '</td><td class="d num">' + d(t.cancelar) + '</td></tr>';
+  h += '</tbody></table></div></div>';
+  return h;
+}
+
 /* Detalle de un pedido: sus opciones en tarjetas (título, precio, ubicación, código y captador) */
 function abrirPedido(idx) {
   var s = calcularMatches().sols[idx]; if (!s) return;
@@ -1939,6 +1961,7 @@ function abrirAgente(i) {
   h += '<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:13px">Nombres en las otras hojas (opcional)</summary><div class="form" style="margin-top:8px">';
   h += '<div><label>Nombre en el Flujo</label><input id="aNf" value="' + esc(a.flujo) + '" placeholder="Igual al nombre corto"></div>';
   h += '<div><label>Nombre en el Análisis</label><input id="aNa" value="' + esc(a.analisis) + '" placeholder="Nombre corto en MAYÚSCULAS"></div>';
+  h += '<div class="full"><label>Apodos (separados por coma)</label><input id="aSe" value="' + esc(a.seudonimos || '') + '" placeholder="Ej.: Nani, La Mona"><div class="muted" style="font-size:12px;margin-top:3px">Si alguien escribe el apodo en Negociaciones, se cambia solo por el nombre completo. Los nombres cortos (Manuel, Maria Lanz…) ya se reconocen sin anotarlos.</div></div>';
   h += '</div></details>';
   h += '<div class="acciones"><button class="btn" data-cerrar>Cancelar</button><button class="btn pri" id="aOk">Guardar</button></div>';
   if (nuevo) h += '<p class="muted" style="font-size:12px;margin-top:10px">Se crea en las tres hojas, con su propia hoja en el Análisis. Escribe el nombre completo igual que en el sistema para que sus transacciones le lleguen solas.</p>';
@@ -1948,7 +1971,7 @@ function abrirAgente(i) {
     var datos = {
       nuevo: nuevo, oficial: $('#aOf').value.trim(), corto: $('#aCo').value.trim(), agencia: $('#aAg').value,
       nivel: Number($('#aNi').value), desde: $('#aDe').value, metaCB: numero($('#aMc').value) || 0, metaT: numero($('#aMt').value) || 0, metaCap: numero($('#aMp').value) || 0,
-      ingreso: $('#aFi').value, activo: $('#aAc').checked, flujo: $('#aNf').value.trim(), analisis: $('#aNa').value.trim()
+      ingreso: $('#aFi').value, activo: $('#aAc').checked, flujo: $('#aNf').value.trim(), analisis: $('#aNa').value.trim(), seudonimos: $('#aSe').value.trim()
     };
     if (!datos.oficial) { toast('Escribe el nombre completo'); return; }
     if (!datos.corto) { toast('Escribe el nombre corto'); return; }
@@ -2053,7 +2076,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-09T16:17:44.560Z';
+  var VERSION = '2026-11-10T01:57:26.529Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
