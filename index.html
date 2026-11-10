@@ -742,7 +742,7 @@ function api(fn) {
 }
 
 /* ───────── Estado ───────── */
-var E = { distModo: 'staff', chat: null, chatVista: 'pedidos', chatDias: '30', chatSolo: false, cfg: null, cfgVista: 'agentes', cfgAg: 'todas', ini: null, datos: null, cuadre: {}, vistaAnal: null, hojas: {}, tab: 'inicio', filtroNeg: 'todas', agNeg: 'todas', buscar: '', agCuadro: 'Avanti', agAnal: 'todas', abiertos: {} };
+var E = { distModo: 'staff', chatEstado: 'pendientes', chat: null, chatVista: 'pedidos', chatDias: '30', chatSolo: false, cfg: null, cfgVista: 'agentes', cfgAg: 'todas', ini: null, datos: null, cuadre: {}, vistaAnal: null, hojas: {}, tab: 'inicio', filtroNeg: 'todas', agNeg: 'todas', buscar: '', agCuadro: 'Avanti', agAnal: 'todas', abiertos: {} };
 
 /* ───────── Utilidades ───────── */
 var fmt = new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1725,8 +1725,30 @@ function calcularMatches() {
   var nuevas = inv.filter(function (x) { var f = fcap(x); return f && f >= lim; }).map(function (x) {
     var p = porInm[x.codigo]; return { inm: x, fecha: fcap(x), pedidos: p ? p.pedidos.slice(0, 10) : [] };
   }).sort(function (a, b) { return b.fecha - a.fecha; });
-  E.chatOpc = { sols: sols, nuevas: nuevas };
+  // Seguimiento: ¿ya se le mandaron opciones? ¿cerró alguna?
+  var SEG = C.seguimiento || {}, cierres = C.cierres || [];
+  var ayudados = [];
+  sols.forEach(function (s) {
+    s.clave = s.fecha + '|' + s.hora + '|' + s.asesor;
+    s.agente = (C.agentes || {})[s.asesor] || '';
+    s.seg = SEG[s.clave] || null;
+    s.cierre = null;
+    if (s.seg) {
+      var desde = String(s.seg.enviado || '').slice(0, 10), mandados = s.seg.codigos || [];
+      var c = cierres.filter(function (x) { return x.fecha >= desde && mandados.indexOf(x.codigo) >= 0; })[0];
+      if (c) { s.cierre = c; ayudados.push(s); }
+    }
+  });
+  E.chatOpc = { sols: sols, nuevas: nuevas, ayudados: ayudados };
   return E.chatOpc;
+}
+function telDe(oficial) {
+  var t = String(((E.chat || {}).telefonos || {})[oficial] || '').replace(/\D/g, '');
+  if (!t) return '';
+  if (t.indexOf('00') === 0) t = t.slice(2);
+  if (t.charAt(0) === '0') t = '58' + t.slice(1);
+  else if (t.length === 10 && t.charAt(0) === '4') t = '58' + t;
+  return t;
 }
 function vChat() {
   var h = '<div class="barra-acc"><div><h2 style="margin:0">Chat y matches</h2><p class="sub" style="margin:2px 0 0">Lo que piden en el grupo y lo que tenemos activo en Novus.</p></div><button class="btn pri" data-cargar-chat>Cargar chat o inventario</button></div>';
@@ -1740,13 +1762,20 @@ function vChat() {
   h += '<div class="card kpi"><div class="l">Pedidos (' + dias + ' días)</div><div class="v">' + sols.length + '</div></div>';
   h += '<div class="card kpi"><div class="l">Con opciones nuestras</div><div class="v">' + conOpc.length + '</div></div>';
   h += '<div class="card kpi"><div class="l">Inventario activo</div><div class="v">' + C.inventario.length + '</div><div class="muted" style="font-size:12px">' + (C.inventarioCargado ? 'cargado ' + esc(C.inventarioCargado) : 'sin cargar') + '</div></div>';
-  h += '<div class="card kpi"><div class="l">Último mensaje cargado</div><div class="v" style="font-size:16px">' + esc(C.ultimo || '—') + '</div></div>';
-  h += '</div><div style="height:12px"></div>';
+  var enviados = sols.filter(function (s) { return s.seg; }), ayud = M.ayudados.filter(function (s) { return s.fecha >= lim; });
+  var comAyud = ayud.reduce(function (t, s) { return t + (s.cierre.comision || 0); }, 0);
+  h += '<div class="card kpi"><div class="l">Les mandé opciones</div><div class="v">' + enviados.length + '</div><div class="muted" style="font-size:12px">de ' + conOpc.length + ' con opciones</div></div>';
+  h += '<div class="card kpi"><div class="l">Cerraron con mi match</div><div class="v">' + ayud.length + '</div><div class="muted" style="font-size:12px">' + (ayud.length ? d0(comAyud) + ' en comisión' : 'en ' + dias + ' días') + '</div></div>';
+  h += '</div><div class="muted" style="font-size:12px;margin:6px 0 12px">Último mensaje cargado: ' + esc(C.ultimo || '—') + '</div>';
   if (!C.inventario.length) h += '<div class="card" style="border:2px solid var(--ambar);margin-bottom:12px"><b>Falta el inventario de Novus.</b> Sin los listados de inmuebles no hay con qué comparar los pedidos.<div style="margin-top:8px"><button class="btn pri" data-cargar-chat>Cargar los listados de Avanti y Avanti II</button></div><div class="muted" style="font-size:12px;margin-top:6px">Son los Excel "Listado de inmuebles" que bajas de Novus. Desde la computadora es más fácil.</div></div>';
-  h += '<div class="barra-filtros">' + seg('chatVista', [['pedidos', 'Pedidos'], ['captaciones', 'Captaciones nuevas']]) + seg('chatDias', [['7', '7 días'], ['30', '30 días'], ['90', '90 días']]) + '</div>';
+  h += '<div class="barra-filtros">' + seg('chatVista', [['pedidos', 'Pedidos'], ['resultados', 'Cerraron con mi match'], ['captaciones', 'Captaciones nuevas']]) + seg('chatDias', [['7', '7 días'], ['30', '30 días'], ['90', '90 días']]) + '</div>';
   if ((E.chatVista || 'pedidos') === 'captaciones') return h + vCaptChat(M);
+  if (E.chatVista === 'resultados') return h + vResultadosChat(ayud, enviados);
   var lista = E.chatSolo ? conOpc : sols;
-  h += '<label class="muted" style="display:flex;gap:6px;align-items:center;font-size:13px;margin:0 0 10px"><input type="checkbox" id="chatSolo"' + (E.chatSolo ? ' checked' : '') + '> Solo los que tienen opciones</label>';
+  if (E.chatEstado === 'pendientes') lista = lista.filter(function (s) { return !s.seg; });
+  if (E.chatEstado === 'enviados') lista = lista.filter(function (s) { return s.seg; });
+  h += '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:0 0 10px">' + seg('chatEstado', [['pendientes', 'Por mandar'], ['enviados', 'Ya mandados'], ['todos', 'Todos']]) +
+    '<label class="muted" style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="chatSolo"' + (E.chatSolo ? ' checked' : '') + '> Solo los que tienen opciones</label></div>';
   if (!lista.length) return h + '<div class="card vacio">No hay pedidos en este período.</div>';
   h += '<div class="lista">';
   lista.forEach(function (s, i) {
@@ -1756,10 +1785,24 @@ function vChat() {
     h += '<div class="click" data-pedido="' + M.sols.indexOf(s) + '" style="cursor:pointer"><div style="display:flex;justify-content:space-between;gap:10px"><b>' + esc(nombreChat(s.asesor)) + '</b><span class="muted" style="font-size:12px;white-space:nowrap">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + '</span></div>';
     h += '<div style="font-size:13px;margin:4px 0">' + esc(s.mensaje.length > 220 && !abierto ? s.mensaje.slice(0, 220) + '…' : s.mensaje) + '</div>';
     h += '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') +
-      resumenOpciones(s.opciones, abierto) + '</div></div>';
+      resumenOpciones(s.opciones, abierto) +
+      (s.seg ? '<span class="chip verde">✓ mandado ' + esc(String(s.seg.enviado).slice(8, 10) + '/' + String(s.seg.enviado).slice(5, 7)) + '</span>' : '') +
+      (s.cierre ? '<span class="chip verde">🎉 cerró ' + esc(s.cierre.codigo) + '</span>' : '') + '</div></div>';
     h += '</div>';
   });
   return h + '</div>';
+}
+function vResultadosChat(ayud, enviados) {
+  var h = '<p class="muted" style="margin:0 0 10px;font-size:13px">Pedidos a los que les mandaste opciones y que después cerraron (en el listado del sistema) uno de los inmuebles que les pasaste.</p>';
+  if (!ayud.length) return h + '<div class="card vacio">Todavía ninguno. Llevas ' + enviados.length + ' pedido' + (enviados.length === 1 ? '' : 's') + ' con opciones mandadas en este período.</div>';
+  ayud.forEach(function (s) {
+    var c = s.cierre, inm = (E.chat.inventario || []).filter(function (x) { return x.codigo === c.codigo; })[0];
+    h += '<div class="card" style="padding:12px 14px;margin-bottom:8px"><div style="display:flex;justify-content:space-between;gap:10px"><b>🎉 ' + esc(nombreChat(s.asesor)) + '</b><b class="num">' + d0(c.comision) + '</b></div>';
+    h += '<div style="font-size:13px;margin:3px 0">Cerró <b>' + esc(c.codigo) + '</b>' + (inm ? ' · ' + esc(inm.titulo) : ' · ' + esc(c.operacion + ' ' + c.tipo + ' ' + c.zona)) + ' · $' + fmt0.format(c.monto) + ' el ' + esc(c.fecha.split('-').reverse().join('/')) + '</div>';
+    h += '<div class="muted" style="font-size:12px">Pedido del ' + esc(s.fecha.split('-').reverse().join('/')) + ': “' + esc(s.mensaje.slice(0, 120)) + (s.mensaje.length > 120 ? '…' : '') + '” · mandado ' + esc(s.seg.enviado) + ' por ' + esc(s.seg.por) + '</div>';
+    h += '<div class="muted" style="font-size:12px">Captador: ' + esc(corto(c.captador)) + ' · Colocador: ' + esc(corto(c.colocador)) + '</div></div>';
+  });
+  return h;
 }
 var NIVEL_OPC = { coincide: ['verde', 'Coincide'], parecida: ['ambar', 'Parecida'], cercana: ['', 'Lo más cercano'] };
 function resumenOpciones(ops, abierto) {
@@ -1795,33 +1838,73 @@ function vProvisionales() {
 function abrirPedido(idx) {
   var s = calcularMatches().sols[idx]; if (!s) return;
   var chips = [s.operacion, s.inmueble, s.zona, s.precio ? '$' + s.precio : ''].filter(function (x) { return x && x !== 'Sin especificar'; });
-  $('#tituloSaldo').textContent = 'Pedido de ' + nombreChat(s.asesor);
-  var h = '<div class="muted" style="font-size:12px">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + '</div>';
+  var quien = s.agente ? corto(s.agente) : nombreChat(s.asesor), tel = s.agente ? telDe(s.agente) : '';
+  $('#tituloSaldo').textContent = 'Pedido de ' + quien;
+  var h = '<div class="muted" style="font-size:12px">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + (s.agente ? '' : ' · <span title="No está en AGENTES">asesor sin ficha</span>') + '</div>';
   h += '<div style="margin:6px 0 8px">' + esc(s.mensaje) + '</div>';
-  h += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') + '</div>';
+  h += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') + '</div>';
+  if (s.seg) h += '<div class="card" style="padding:8px 12px;margin-bottom:10px;background:#eefaf3;border-color:#bfe8cf">✓ Le mandaste opciones el ' + esc(s.seg.enviado) + ' (' + esc(s.seg.por) + (s.seg.como ? ', ' + esc(s.seg.como) : '') + ')' + (s.seg.codigos.length ? ': ' + esc(s.seg.codigos.join(', ')) : '') + (s.cierre ? '<br><b>🎉 Cerró ' + esc(s.cierre.codigo) + ' el ' + esc(s.cierre.fecha.split('-').reverse().join('/')) + '</b>' : '') + '</div>';
   if (!E.chat.inventario.length) h += '<div class="aviso">Falta cargar el inventario de Novus para buscar opciones.</div>';
   else if (!s.opciones.length) h += '<div class="aviso">No encontré opciones. ' + (chips.length < 2 ? 'El pedido dice muy poco (hace falta al menos tipo y zona, o tipo y presupuesto).' : 'No hay nada activo de ese tipo y operación.') + '</div>';
   else {
-    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b>' + s.opciones.length + ' opciones</b><button class="btn chico" id="copiarOpc">Copiar para WhatsApp</button></div>';
-    s.opciones.forEach(function (o) {
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b>' + s.opciones.length + ' opciones</b><span class="muted" style="font-size:12px">Marca las que vas a mandar</span></div>';
+    s.opciones.forEach(function (o, k) {
       var x = o.inm, nv = NIVEL_OPC[o.nivel] || ['', ''];
+      var marcada = s.seg ? s.seg.codigos.indexOf(x.codigo) >= 0 : o.nivel !== 'cercana';
       var ubic = [x.ubicacion.split(',')[0], x.direccion].filter(Boolean).join(' · ');
-      h += '<div style="border:1px solid var(--linea);border-radius:12px;padding:10px 12px;margin-bottom:8px">';
-      h += '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><b>' + esc(x.titulo) + '</b><b class="num" style="white-space:nowrap;font-size:16px">' + d0(x.precio) + '</b></div>';
+      h += '<label style="display:flex;gap:10px;border:1px solid var(--linea);border-radius:12px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-weight:400">';
+      h += '<input type="checkbox" class="opc-envio" data-k="' + k + '"' + (marcada ? ' checked' : '') + ' style="width:20px;height:20px;flex:0 0 auto;margin-top:2px">';
+      h += '<div style="flex:1;min-width:0"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><b>' + esc(x.titulo) + '</b><b class="num" style="white-space:nowrap;font-size:16px">' + d0(x.precio) + '</b></div>';
       h += '<div class="muted" style="font-size:12px;margin:3px 0">📍 ' + esc(ubic.slice(0, 140)) + '</div>';
       h += '<div style="font-size:13px">Código <b>' + esc(x.codigo) + '</b> · ' + esc(x.agencia) + ' · Captador: <b>' + esc(corto(x.agente)) + '</b></div>';
       h += '<div class="muted" style="font-size:12px">' + esc(x.operacion) + (x.hab ? ' · ' + x.hab + ' hab' : '') + (x.banos ? ' · ' + x.banos + ' baños' : '') + (x.area ? ' · ' + fmt0.format(x.area) + ' m²' : '') + (x.terreno ? ' · terreno ' + fmt0.format(x.terreno) + ' m²' : '') + '</div>';
-      h += '<div style="margin-top:5px"><span class="chip ' + nv[0] + '" style="font-size:11px">' + nv[1] + '</span>' + (o.nota ? ' <span style="font-size:12px">' + esc(o.nota) + '</span>' : '') + '</div>';
-      h += '</div>';
+      h += '<div style="margin-top:5px"><span class="chip ' + nv[0] + '" style="font-size:11px">' + nv[1] + '</span>' + (o.nota ? ' <span style="font-size:12px">' + esc(o.nota) + '</span>' : '') + '</div></div></label>';
     });
+    h += '<div class="acciones" style="flex-wrap:wrap;justify-content:flex-start">';
+    h += '<button class="btn pri" id="waOpc" style="background:#1fa855;border-color:#1fa855">WhatsApp ' + (tel ? 'a ' + esc(quien) : '(elegir chat)') + '</button>';
+    h += '<button class="btn" id="copiarOpc">Copiar</button>';
+    h += '<button class="btn" id="marcarOpc">' + (s.seg ? 'Quitar ✓' : 'Marcar ✓ mandado') + '</button></div>';
+    if (!tel && s.agente) h += '<p class="muted" style="font-size:12px;margin:6px 0 0">Para que abra directo el chat de ' + esc(quien) + ', agrega su teléfono en ⚙ Configuración → Agentes.</p>';
   }
   h += '<div class="acciones"><button class="btn" data-cerrar>Cerrar</button></div>';
   $('#cuerpoSaldo').innerHTML = h;
   $('#modalSaldo').classList.add('on');
+
+  function elegidas() { return $$('.opc-envio').filter(function (c) { return c.checked; }).map(function (c) { return s.opciones[Number(c.dataset.k)]; }); }
+  function texto(ops) {
+    var nombre = quien.split(' ')[0];
+    return 'Hola ' + nombre + '! Para tu pedido del ' + s.fecha.split('-').reverse().slice(0, 2).join('/') + (chips.length ? ' (' + chips.join(', ') + ')' : '') + ' te paso estas opciones nuestras:\n\n' +
+      ops.map(function (o) { var x = o.inm; return '• ' + x.titulo + '\n  $' + fmt0.format(x.precio) + ' · Cód. ' + x.codigo + ' · ' + x.agencia + ' · Captador: ' + corto(x.agente); }).join('\n\n');
+  }
+  function marcar(ops, como) {
+    return api('app_marcarPedido', { clave: s.clave, fecha: s.fecha + ' ' + s.hora, asesor: s.asesor, agente: s.agente, mensaje: s.mensaje, codigos: ops.map(function (o) { return o.inm.codigo; }), como: como })
+      .then(function () {
+        s.seg = { enviado: new Date().toISOString().slice(0, 16).replace('T', ' '), por: E.datos && E.datos.usuario || '', codigos: ops.map(function (o) { return o.inm.codigo; }), como: como };
+        E.chat.seguimiento = E.chat.seguimiento || {}; E.chat.seguimiento[s.clave] = s.seg; E.chatOpc = null;
+        if (E.tab === 'chat') pintar();
+      });
+  }
+  var wa = $('#waOpc');
+  if (wa) wa.addEventListener('click', function () {
+    var ops = elegidas(); if (!ops.length) { toast('Marca al menos una opción'); return; }
+    window.open('https://wa.me/' + tel + '?text=' + encodeURIComponent(texto(ops)), '_blank');
+    marcar(ops, 'WhatsApp').then(function () { $('#modalSaldo').classList.remove('on'); toast('✓ Marcado como mandado'); }).catch(function (e) { toast('No se guardó el ✓: ' + e.message, 5000); });
+  });
   var cp = $('#copiarOpc');
   if (cp) cp.addEventListener('click', function () {
-    var txt = 'Opciones para tu pedido:\n' + s.opciones.map(function (o) { var x = o.inm; return '• ' + x.titulo + ' – $' + fmt0.format(x.precio) + ' – Cód. ' + x.codigo + ' (' + corto(x.agente) + ')'; }).join('\n');
-    (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function () { toast('Copiado'); }).catch(function () { toast('No se pudo copiar'); });
+    var ops = elegidas(); if (!ops.length) { toast('Marca al menos una opción'); return; }
+    (navigator.clipboard ? navigator.clipboard.writeText(texto(ops)) : Promise.reject()).then(function () { toast('Copiado'); }).catch(function () { toast('No se pudo copiar'); });
+  });
+  var mc = $('#marcarOpc');
+  if (mc) mc.addEventListener('click', function () {
+    mc.disabled = true;
+    if (s.seg) {
+      api('app_marcarPedido', { clave: s.clave, quitar: true }).then(function () { s.seg = null; delete (E.chat.seguimiento || {})[s.clave]; E.chatOpc = null; $('#modalSaldo').classList.remove('on'); pintar(); toast('Quitado'); })
+        .catch(function (e) { mc.disabled = false; toast(e.message, 5000); });
+    } else {
+      var ops = elegidas(); if (!ops.length) { mc.disabled = false; toast('Marca al menos una opción'); return; }
+      marcar(ops, 'Manual').then(function () { $('#modalSaldo').classList.remove('on'); toast('✓ Marcado como mandado'); }).catch(function (e) { mc.disabled = false; toast(e.message, 5000); });
+    }
   });
 }
 function tablaOpciones(ops) {
@@ -1966,6 +2049,7 @@ function abrirAgente(i) {
   h += '<div><label>Fecha de ingreso</label><input id="aFi" type="date" value="' + esc(a.ingreso) + '"></div>';
   h += '<div class="full"><label style="display:flex;gap:8px;align-items:center;font-weight:600"><input type="checkbox" id="aAc"' + (a.activo ? ' checked' : '') + ' style="width:auto"> Activo (desmárcalo si se fue de la oficina)</label></div>';
   h += '</div>';
+  h += '<div class="form" style="margin-top:8px"><div class="full"><label>Teléfono (para mandarle opciones por WhatsApp)</label><input id="aTe" inputmode="tel" value="' + esc(a.telefono || '') + '" placeholder="0414-1234567"></div></div>';
   h += '<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:13px">Nombres en las otras hojas (opcional)</summary><div class="form" style="margin-top:8px">';
   h += '<div><label>Nombre en el Flujo</label><input id="aNf" value="' + esc(a.flujo) + '" placeholder="Igual al nombre corto"></div>';
   h += '<div><label>Nombre en el Análisis</label><input id="aNa" value="' + esc(a.analisis) + '" placeholder="Nombre corto en MAYÚSCULAS"></div>';
@@ -1979,7 +2063,7 @@ function abrirAgente(i) {
     var datos = {
       nuevo: nuevo, oficial: $('#aOf').value.trim(), corto: $('#aCo').value.trim(), agencia: $('#aAg').value,
       nivel: Number($('#aNi').value), desde: $('#aDe').value, metaCB: numero($('#aMc').value) || 0, metaT: numero($('#aMt').value) || 0, metaCap: numero($('#aMp').value) || 0,
-      ingreso: $('#aFi').value, activo: $('#aAc').checked, flujo: $('#aNf').value.trim(), analisis: $('#aNa').value.trim(), seudonimos: $('#aSe').value.trim()
+      ingreso: $('#aFi').value, activo: $('#aAc').checked, flujo: $('#aNf').value.trim(), analisis: $('#aNa').value.trim(), seudonimos: $('#aSe').value.trim(), telefono: $('#aTe').value.trim()
     };
     if (!datos.oficial) { toast('Escribe el nombre completo'); return; }
     if (!datos.corto) { toast('Escribe el nombre corto'); return; }
@@ -2084,7 +2168,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T02:09:16.518Z';
+  var VERSION = '2026-11-10T02:16:43.089Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
