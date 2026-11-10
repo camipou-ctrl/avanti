@@ -742,7 +742,7 @@ function api(fn) {
 }
 
 /* ───────── Estado ───────── */
-var E = { chat: null, chatVista: 'pedidos', chatDias: '30', chatSolo: false, cfg: null, cfgVista: 'agentes', cfgAg: 'todas', ini: null, datos: null, cuadre: {}, vistaAnal: null, hojas: {}, tab: 'inicio', filtroNeg: 'todas', agNeg: 'todas', buscar: '', agCuadro: 'Avanti', agAnal: 'todas', abiertos: {} };
+var E = { distModo: 'staff', chat: null, chatVista: 'pedidos', chatDias: '30', chatSolo: false, cfg: null, cfgVista: 'agentes', cfgAg: 'todas', ini: null, datos: null, cuadre: {}, vistaAnal: null, hojas: {}, tab: 'inicio', filtroNeg: 'todas', agNeg: 'todas', buscar: '', agCuadro: 'Avanti', agAnal: 'todas', abiertos: {} };
 
 /* ───────── Utilidades ───────── */
 var fmt = new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1097,10 +1097,43 @@ function vDistribucion(a) {
     h += '<option value="' + esc(n.clave) + '"' + (E.distSel === n.clave ? ' selected' : '') + '>Nº ' + n.numero + ' · ' + esc(corto(r.captador)) + (r.colocador !== r.captador ? ' / ' + esc(corto(r.colocador)) : '') + ' · ' + esc(r.descripcion) + '</option>';
   });
   h += '<option value="todas"' + (E.distSel === 'todas' ? ' selected' : '') + '>Todas (' + negs.length + ', una por hoja)</option></select>';
-  h += '<button class="btn pri" data-imprimir>Imprimir</button></div>';
+  h += '<button class="btn" data-imprimir-dist="agente">Imprimir para agentes</button><button class="btn pri" data-imprimir-dist="staff">Imprimir para staff</button></div>';
+  var modo = E.distModo || 'staff';
+  h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) +
+    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Una hoja por agente, solo con su pago. Sin broker, coordinación ni lo que queda a la oficina.' : 'Con toda la distribución: broker, coordinación y lo que queda a la oficina.') + '</span></div>';
   var ver = E.distSel === 'todas' ? negs : negs.filter(function (n) { return n.clave === E.distSel; });
-  h += ver.map(function (n) { return hojaDistribucion(n, a); }).join('');
+  if (modo === 'agente') {
+    ver.forEach(function (n) {
+      var vistos = {};
+      n.filas.forEach(function (r) { if (!vistos[r.agente]) { vistos[r.agente] = 1; h += hojaParaAgente(n, a, r.agente); } });
+    });
+  } else h += ver.map(function (n) { return hojaDistribucion(n, a); }).join('');
   return h;
+}
+/* Hoja para entregar al agente: solo su punta y su pago (sin la parte del staff ni de la oficina) */
+function hojaParaAgente(n, a, nombre) {
+  var P = E.datos.cuadro.distribucion || { regalia: 0.05, iva: 0.16, ivaAgente: 0.8 };
+  var f = n.filas.filter(function (r) { return r.agente === nombre; }), r0 = n.filas[0];
+  function suma(k) { return f.reduce(function (s, r) { return s + (r[k] || 0); }, 0); }
+  var punta = suma('punta'), reg = suma('regalia'), dist = suma('dist'), comAg = suma('comAg'), spiff = suma('spiff'), ivaAg = suma('ivaAg'), cancelar = suma('cancelar');
+  var roles = f.map(function (r) { return r.rol; }), nivel = f[0] ? f[0].nivel : 0;
+  function fila(t, pc, v, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + t + '</td><td class="d">' + (pc || '') + '</td><td class="d">' + (v === '' ? '' : fmt.format(v || 0)) + '</td></tr>'; }
+  var h = '<div class="hoja hoja-dist">';
+  h += '<div class="dist-cab"><div><div class="dist-tit">PAGO DE COMISIÓN</div><div>' + esc(n.mes.toUpperCase()) + ' ' + E.datos.anio + ' · ' + esc(a.agencia.toUpperCase()) + '</div></div><div class="dist-n">Nº ' + n.numero + '</div></div>';
+  h += '<div class="dist-des"><b style="font-size:15px">' + esc(nombre.toUpperCase()) + '</b> · ' + (roles.length > 1 ? 'Captador y colocador' : esc(roles[0] || '')) + ' · Nivel ' + pct(nivel) +
+    '<br><b>' + esc(r0.descripcion) + '</b><br>Captador: ' + esc(r0.captador) + '<br>Colocador: ' + esc(r0.colocador) +
+    '<br><span class="muted">Código: ' + esc(r0.codigo || '—') + ' · Cierre: ' + esc(r0.cierre || '—') + ' · Monto: $' + fmt.format(r0.monto) + '</span></div>';
+  h += '<table class="dist-t"><tbody>';
+  h += fila('<b>COMISIÓN DE ' + (roles.length > 1 ? 'TUS PUNTAS' : 'TU PUNTA') + '</b>', '', punta, 'sub');
+  h += fila('Regalía RE/MAX', pct(P.regalia), reg);
+  h += fila('<b>Comisión a distribuir</b>', '', dist, 'sub');
+  h += fila('Tu comisión (nivel ' + pct(nivel) + ')', pct(nivel), comAg);
+  h += fila('SPIFF', '', spiff ? spiff : '');
+  h += fila('(−) ' + pct(P.ivaAgente) + ' del IVA de la regalía', '', ivaAg);
+  h += fila('<b>TOTAL A CANCELAR</b>', '', cancelar, 'tot');
+  h += '</tbody></table>';
+  h += '<div class="dist-firma"><div>Recibido por ' + esc(corto(nombre)) + '</div><div>Administración</div></div>';
+  return h + '</div>';
 }
 function hojaDistribucion(n, a) {
   var P = E.datos.cuadro.distribucion || { regalia: 0.05, iva: 0.16, ivaAgente: 0.8, coord: {}, broker: {}, uno: {} };
@@ -1500,6 +1533,9 @@ function enlazar() {
   $$('[data-reporte]').forEach(function (el) { el.addEventListener('click', function () { E.vistaAnal = { tipo: 'reporte' }; pintar(); window.scrollTo(0, 0); }); });
   $$('[data-volver]').forEach(function (el) { el.addEventListener('click', function () { E.vistaAnal = null; pintar(); }); });
   $$('[data-imprimir]').forEach(function (el) { el.addEventListener('click', function () { window.print(); }); });
+  $$('[data-imprimir-dist]').forEach(function (el) { el.addEventListener('click', function () {
+    E.distModo = el.dataset.imprimirDist; pintar(); setTimeout(function () { window.print(); }, 80);
+  }); });
   $$('[data-resumen]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = 'resumen'; pintar(); window.scrollTo(0, 0); }); });
   $$('[data-volver-cuadro]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = null; pintar(); }); });
   $$('[data-imprimir-resumen]').forEach(function (el) { el.addEventListener('click', imprimirResumen); });
@@ -2076,7 +2112,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T01:57:26.529Z';
+  var VERSION = '2026-11-10T02:02:43.647Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
