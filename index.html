@@ -1281,8 +1281,11 @@ function vCuadre() {
   }
   if (C.sinSistema.length) {
     h += '<h3>En la base como cerradas, pero no salen en el sistema este mes</h3><p class="sub">Puede que se hayan cerrado en otro mes en el sistema, o que falte importar el listado. Toca para revisarlas.</p>';
-    h += '<div class="negs">' + C.sinSistema.map(tarjetaNeg).join('') + '</div>';
+    h += '<div class="negs">' + C.sinSistema.map(function (n, i) {
+      return '<div>' + tarjetaNeg(n) + '<button class="btn" data-cuadre-ok="' + i + '" style="margin-top:6px;width:100%">✓ Está bien, no avisar más</button></div>';
+    }).join('') + '</div>';
   }
+  if (C.vistas) h += '<p class="muted" style="font-size:13px;margin-top:12px">' + C.vistas + ' marcada' + (C.vistas > 1 ? 's' : '') + ' como «está bien» · <a href="#" id="cuadreVer">volver a mostrar</a></p>';
   if (!C.enProceso.length && !C.faltan.length) h += '<div class="card vacio">Todo cuadra. 👌</div>';
   return h;
 }
@@ -1337,6 +1340,18 @@ function enlazarCuadre() {
         E.datosViejos = true;
       }).catch(function (e) { btn.disabled = false; toast('No se guardó: ' + (e.message || e), 5000); });
     });
+  });
+  $$('[data-cuadre-ok]').forEach(function (b) {
+    b.addEventListener('click', function (ev) {
+      ev.stopPropagation(); var C = E.cuadre[claveMes()], n = C.sinSistema[Number(b.dataset.cuadreOk)]; b.disabled = true;
+      api('app_cuadreOk', n.claveOk).then(function () { C.sinSistema.splice(C.sinSistema.indexOf(n), 1); C.vistas = (C.vistas || 0) + 1; pintar(); toast('Listo, no vuelve a salir'); })
+        .catch(function (e) { b.disabled = false; toast(e.message, 5000); });
+    });
+  });
+  var cV = $('#cuadreVer');
+  if (cV) cV.addEventListener('click', function (ev) {
+    ev.preventDefault();
+    api('app_cuadreOk', E.datos.mes + '|' + E.datos.anio + '|', 'todas').then(function () { delete E.cuadre[claveMes()]; pintar(); }).catch(function (e) { toast(e.message, 5000); });
   });
   $$('[data-todas]').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -2334,7 +2349,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T02:43:42.385Z';
+  var VERSION = '2026-11-10T14:52:44.279Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
