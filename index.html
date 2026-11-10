@@ -544,6 +544,18 @@ var CHAT = (function () {
   }
   function habitacionesDe(t) { var m = norm(t).match(/(\d)\s*(hab|habitaciones|habitacion|cuartos|dormitorios|h\b)/); return m ? +m[1] : 0; }
 
+  /* Metros que pide: "1000 m2", "1.000 mtrs2", "de 500 a 1000 metros" → {min, max} (un solo número = mínimo) */
+  function areaDe(t) {
+    var n = norm(t).replace(/²/g, '2'), rx = /(\d[\d.,]*)\s*(?:a|-|y|hasta)?\s*(?=(?:\d[\d.,]*\s*)?(?:m2|mt2|mts2?|mtrs2?|metros|mtr2?|m 2)\b)/g, m, v = [];
+    while ((m = rx.exec(n))) {
+      var x = m[1].replace(/[.,]$/, '');
+      x = /,\d{1,2}$/.test(x) ? x.replace(/\./g, '').replace(',', '.') : x.replace(/[.,](?=\d{3}\b)/g, '').replace(',', '.');
+      x = parseFloat(x); if (x >= 20 && x < 5e6) v.push(x);
+    }
+    if (!v.length) return null;
+    return v.length === 1 ? { min: v[0], max: 0 } : { min: Math.min.apply(null, v), max: Math.max.apply(null, v) };
+  }
+
   /* ── 3. Clasificar ── */
   var RX_CAPT = /(nueva captaci|nuevas captaci|en proceso de captaci|captamos|captacion nueva|recien captad|acabo de captar|\bcaptad[oa]s?\b|tenemos nueva|nuevo inmueble|nueva propiedad|nuevo ingreso)/;
   var RX_CIERRE = /(captador\s*:|colocador\s*:|vendido|alquilado|cerrad[oa] con exito|felicidades|felicitaciones)/;
@@ -646,6 +658,7 @@ var CHAT = (function () {
     var tipos = sol.inmueble && sol.inmueble !== 'Sin especificar' ? sol.inmueble.split(', ') : [];
     var zonas = sol.zona && sol.zona !== 'Sin especificar' ? sol.zona.split(', ') : [];
     var op = sol.operacion, p = sol.presupuesto !== undefined ? sol.presupuesto : precioDe(sol.mensaje), hab = habitacionesDe(sol.mensaje);
+    var ar = areaDe(sol.mensaje), DE_TERRENO = ['Terreno', 'Finca', 'Galpón'];
     var RAROS = ['Galpón', 'Edificio', 'Posada/Hotel', 'Finca', 'Oficina', 'Habitación'];
     var criterios = (tipos.length ? 1 : 0) + (zonas.length ? 1 : 0) + (p ? 1 : 0);
     if (!(criterios >= 2 || (tipos.length && tipos.every(function (q) { return RAROS.indexOf(q) >= 0; })))) return [];
@@ -660,6 +673,12 @@ var CHAT = (function () {
       var zonaEn = zonas.filter(function (q) { return x._z.indexOf(q) >= 0; });
       var zonaOk = !zonas.length || zonaEn.length > 0;
       var habOk = !hab || !x.hab || x.hab >= hab;
+      // Metros: en terrenos manda el área de terreno; si pide 1000 m² uno de 200 no sirve
+      var mt = DE_TERRENO.indexOf(x._cat) >= 0 ? (Number(x.terreno) || Number(x.area) || 0) : (Number(x.area) || Number(x.terreno) || 0);
+      var areaFalta = 0;
+      if (ar && mt) { if (mt < ar.min) areaFalta = (ar.min - mt) / ar.min; else if (ar.max && mt > ar.max) areaFalta = Math.min((mt - ar.max) / ar.max, 1) / 2; }
+      if (areaFalta > 0.5) return;
+      if (areaFalta > 0.2) habOk = false;
       var pv = x.precio, desv = 0, sobre = 0;
       // un alquiler de $700 no le sirve a quien compra con $100.000 (ni al revés)
       if (p && p.max && (pv < p.max * 0.1 || pv > p.max * 5)) return;
@@ -674,13 +693,15 @@ var CHAT = (function () {
       if (zonaEn.length) motivos.push(zonaEn.join(', '));
       if (p && desv <= 0.12) motivos.push(plata(pv));
       if (hab && x.hab && habOk) motivos.push(x.hab + ' hab');
+      if (ar && mt && areaFalta <= 0.2) motivos.push(Math.round(mt).toLocaleString('es-VE') + ' m²');
+      var notaHab = areaFalta > 0.2 ? 'tiene ' + Math.round(mt).toLocaleString('es-VE') + ' m²' : 'tiene ' + x.hab + ' hab';
       var nivel, nota = '';
       var notaPrecio = sobre > 0 ? '+' + plata(sobre) + ' sobre el presupuesto' : sobre < 0 ? plata(-sobre) + ' por debajo' : '';
       if (zonaOk && desv <= 0.12 && habOk) nivel = 'coincide';
       else if (zonaOk && desv <= 0.30 && habOk) { nivel = 'parecida'; nota = notaPrecio; }
       else if (!zonaOk && desv <= 0.12 && habOk) { nivel = 'parecida'; nota = 'otra zona: ' + (x._z[0] || x.ubicacion.split(',')[0]); }
-      else if (zonaOk && desv <= 0.12 && !habOk) { nivel = 'parecida'; nota = 'tiene ' + x.hab + ' hab'; }
-      else { nivel = 'cercana'; nota = [notaPrecio, zonaOk ? '' : 'otra zona: ' + (x._z[0] || x.ubicacion.split(',')[0]), habOk ? '' : x.hab + ' hab'].filter(Boolean).join(' · '); }
+      else if (zonaOk && desv <= 0.12 && !habOk) { nivel = 'parecida'; nota = notaHab; }
+      else { nivel = 'cercana'; nota = [notaPrecio, zonaOk ? '' : 'otra zona: ' + (x._z[0] || x.ubicacion.split(',')[0]), habOk ? '' : notaHab].filter(Boolean).join(' · '); }
       var dist = desv + (zonaOk ? 0 : 0.6) + (habOk ? 0 : 0.25);
       // dentro de lo que coincide: más cerca del presupuesto primero (no lo más barato)
       var cerca = p && p.max ? Math.abs(p.max - pv) / p.max : 0;
@@ -703,7 +724,7 @@ var CHAT = (function () {
   }
 
   return { leer: leer, clasificar: clasificar, registros: registros, inventario: inventario, opcionesPara: opcionesPara,
-    zonasDe: zonasDe, tiposDe: tiposDe, operacionDe: operacionDe, precioDe: precioDe, norm: norm,
+    zonasDe: zonasDe, tiposDe: tiposDe, operacionDe: operacionDe, precioDe: precioDe, areaDe: areaDe, norm: norm,
     listaZonas: ZONAS.map(function (z) { return z[0]; }), listaTipos: TIPOS.map(function (t) { return t[0]; }) };
 })();
 
@@ -2349,7 +2370,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T14:52:44.279Z';
+  var VERSION = '2026-11-10T15:49:07.412Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
