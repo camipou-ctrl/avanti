@@ -1840,7 +1840,7 @@ function abrirPedido(idx) {
   var chips = [s.operacion, s.inmueble, s.zona, s.precio ? '$' + s.precio : ''].filter(function (x) { return x && x !== 'Sin especificar'; });
   var quien = s.agente ? corto(s.agente) : nombreChat(s.asesor), tel = s.agente ? telDe(s.agente) : '';
   $('#tituloSaldo').textContent = 'Pedido de ' + quien;
-  var h = '<div class="muted" style="font-size:12px">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + (s.agente ? '' : ' · <span title="No está en AGENTES">asesor sin ficha</span>') + '</div>';
+  var h = '<div class="muted" style="font-size:12px">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + (s.agente ? '' : ((E.chat.staff || {})[s.asesor] ? ' · staff (' + esc(E.chat.staff[s.asesor]) + ')' : ' · <span title="No está en AGENTES">externo</span>')) + '</div>';
   h += '<div style="margin:6px 0 8px">' + esc(s.mensaje) + '</div>';
   h += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') + '</div>';
   if (s.seg) h += '<div class="card" style="padding:8px 12px;margin-bottom:10px;background:#eefaf3;border-color:#bfe8cf">✓ Le mandaste opciones el ' + esc(s.seg.enviado) + ' (' + esc(s.seg.por) + (s.seg.como ? ', ' + esc(s.seg.como) : '') + ')' + (s.seg.codigos.length ? ': ' + esc(s.seg.codigos.join(', ')) : '') + (s.cierre ? '<br><b>🎉 Cerró ' + esc(s.cierre.codigo) + ' el ' + esc(s.cierre.fecha.split('-').reverse().join('/')) + '</b>' : '') + '</div>';
@@ -2168,7 +2168,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T02:16:43.089Z';
+  var VERSION = '2026-11-10T02:27:56.545Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
