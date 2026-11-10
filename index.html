@@ -676,7 +676,13 @@ var CHAT = (function () {
       // Metros: en terrenos manda el área de terreno; si pide 1000 m² uno de 200 no sirve
       var mt = DE_TERRENO.indexOf(x._cat) >= 0 ? (Number(x.terreno) || Number(x.area) || 0) : (Number(x.area) || Number(x.terreno) || 0);
       var areaFalta = 0;
-      if (ar && mt) { if (mt < ar.min) areaFalta = (ar.min - mt) / ar.min; else if (ar.max && mt > ar.max) areaFalta = Math.min((mt - ar.max) / ar.max, 1) / 2; }
+      var areaLejos = 0;
+      if (ar && mt) {
+        var tope = ar.max ? ar.max * 1.2 : ar.min * 1.5; // pide 1000: hasta 1500 está bien, hasta 2500 "parecida", más grande ya no
+        if (mt < ar.min) areaFalta = (ar.min - mt) / ar.min;
+        else if (mt > tope) { if (mt > (ar.max ? ar.max * 2 : ar.min * 2.5)) return; areaFalta = 0.3; }
+        areaLejos = Math.min(Math.abs(mt - (ar.max ? (ar.min + ar.max) / 2 : ar.min)) / ar.min, 2) * 0.05;
+      }
       if (areaFalta > 0.5) return;
       if (areaFalta > 0.2) habOk = false;
       var pv = x.precio, desv = 0, sobre = 0;
@@ -702,7 +708,7 @@ var CHAT = (function () {
       else if (!zonaOk && desv <= 0.12 && habOk) { nivel = 'parecida'; nota = 'otra zona: ' + (x._z[0] || x.ubicacion.split(',')[0]); }
       else if (zonaOk && desv <= 0.12 && !habOk) { nivel = 'parecida'; nota = notaHab; }
       else { nivel = 'cercana'; nota = [notaPrecio, zonaOk ? '' : 'otra zona: ' + (x._z[0] || x.ubicacion.split(',')[0]), habOk ? '' : notaHab].filter(Boolean).join(' · '); }
-      var dist = desv + (zonaOk ? 0 : 0.6) + (habOk ? 0 : 0.25);
+      var dist = desv + (zonaOk ? 0 : 0.6) + (habOk ? 0 : 0.25) + areaLejos;
       // dentro de lo que coincide: más cerca del presupuesto primero (no lo más barato)
       var cerca = p && p.max ? Math.abs(p.max - pv) / p.max : 0;
       todos.push({ inm: x, nivel: nivel, nota: nota, motivos: motivos, dist: dist, cerca: cerca, fecha: fechaCap(x) });
@@ -2370,7 +2376,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T15:49:07.412Z';
+  var VERSION = '2026-11-10T15:53:23.833Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
