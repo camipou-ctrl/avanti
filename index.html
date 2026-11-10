@@ -1898,6 +1898,11 @@ function vResultadosChat(ayud, enviados) {
   return h;
 }
 var NIVEL_OPC = { coincide: ['verde', 'Coincide'], parecida: ['ambar', 'Parecida'], cercana: ['', 'Lo más cercano'] };
+/* Para el mensaje de WhatsApp: "✅ Coincide" o "🟡 Parecida: tiene 2.458 m²" */
+function etiquetaOpcion(o) {
+  var e = o.nivel === 'coincide' ? '✅ Coincide' : o.nivel === 'parecida' ? '🟡 Parecida' : '🔎 Lo más cercano';
+  return e + (o.nota ? ': ' + o.nota : '');
+}
 function resumenOpciones(ops, abierto) {
   if (!ops.length) return '<span class="chip muted">sin opciones</span>';
   var c = { coincide: 0, parecida: 0, cercana: 0 }; ops.forEach(function (o) { c[o.nivel]++; });
@@ -1971,7 +1976,7 @@ function abrirPedido(idx) {
   function texto(ops) {
     var nombre = quien.split(' ')[0];
     return 'Hola ' + nombre + '! Para tu pedido del ' + s.fecha.split('-').reverse().slice(0, 2).join('/') + (chips.length ? ' (' + chips.join(', ') + ')' : '') + ' te paso estas opciones nuestras:\n\n' +
-      ops.map(function (o) { var x = o.inm; return '• ' + x.titulo + '\n  $' + fmt0.format(x.precio) + ' · Cód. ' + x.codigo + ' · ' + x.agencia + ' · Captador: ' + corto(x.agente); }).join('\n\n');
+      ops.map(function (o) { var x = o.inm; return '• ' + x.titulo + '\n  $' + fmt0.format(x.precio) + ' · Cód. ' + x.codigo + ' · ' + x.agencia + ' · Captador: ' + corto(x.agente) + '\n  ' + etiquetaOpcion(o); }).join('\n\n');
   }
   function marcar(ops, como) {
     return api('app_marcarPedido', { clave: s.clave, fecha: s.fecha + ' ' + s.hora, asesor: s.asesor, agente: s.agente, mensaje: s.mensaje, codigos: ops.map(function (o) { return o.inm.codigo; }), como: como })
@@ -2377,7 +2382,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T15:53:40.132Z';
+  var VERSION = '2026-11-10T16:00:37.463Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
