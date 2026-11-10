@@ -299,6 +299,9 @@
   .acm-tit { font-weight: 600; }
   .acm-dir { color: var(--suave); font-size: 12px; margin-top: 2px; }
   .acm-res .grande { font-size: 24px; font-weight: 800; color: var(--azul); }
+  .acm-bloque { border-left: 4px solid var(--azul-2); background: #fafbfd; border-radius: 8px; padding: 8px 12px; }
+  .acm-bloque .v { font-size: 20px; font-weight: 800; margin: 2px 0; }
+  .acm-pag { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: center; margin: 12px 0 4px; }
   .acm-zonas { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .acm-zonas button { border: 1px solid var(--linea); background: #fff; border-radius: 99px; padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--suave); }
   .acm-zonas button.on { background: var(--azul-2); border-color: var(--azul-2); color: #fff; }
@@ -312,7 +315,7 @@
   }
   .hoja-acm { color: #111; }
   .hoja-acm .cab-acm { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid var(--azul); padding-bottom: 8px; margin-bottom: 12px; }
-  .hoja-acm .cifras-acm { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+  .hoja-acm .cifras-acm { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0; }
   .hoja-acm .cifras-acm div { border: 1px solid #c9d1de; border-radius: 8px; padding: 8px 10px; }
   .hoja-acm .cifras-acm b { display: block; font-size: 16px; color: var(--azul); }
   .hoja-acm table { font-size: 11px; }
@@ -2228,11 +2231,14 @@ $('#btnChatSubir').addEventListener('click', function () {
 });
 
 /* ───────── ACM (análisis comparativo de mercado) ─────────
- * Comparables = cierres del sistema (precio real) con título, dirección y metros de Novus.
+ * Dos tipos de comparables que no se mezclan:
+ *   Vendidas   → cierres del sistema (precio real de cierre): de aquí sale el valor.
+ *   Publicadas → inventario activo de Novus (precio pedido): la competencia de hoy.
  * La zona se lee del título primero, porque la de Novus casi siempre dice "Carirubana" (el municipio).
- * Lo que se escribe y se marca se guarda en este teléfono/computadora.
+ * Lo que se escribe y se marca se guarda en este teléfono/computadora; "Guardar" lo deja en la BASE CENTRAL.
  */
-var ACM_DEF = { tipo: 'Terreno y Parcela', op: 'Venta', desde: 'anio', buscar: '', zona: '', parecido: false, m2t: '', m2c: '', base: 'terreno', ajuste: '', nota: '', titulo: '', sel: {}, manual: [] };
+var ACM_DEF = { tipo: 'Terreno y Parcela', op: 'Venta', desde: 'anio', buscar: '', zona: '', parecido: false, m2t: '', m2c: '', base: 'terreno', ajuste: '', nota: '', titulo: '', sel: {}, manual: [], lista: 'v', pag: 1, id: '' };
+var ACM_POR_PAGINA = 20;
 E.acm = null;
 E.acmF = Object.assign({}, ACM_DEF, leerLocal('remax_acm') || {});
 var ACM_CARGANDO = false;
@@ -2250,6 +2256,8 @@ var ACM_SECTORES = [
   ['Las Virtudes I', ['virtudes i', 'virtudes 1']],
   ['Terrazas del Club de Golf', ['terrazas del club', 'club de golf']],
   ['Parc. La Muñeca', ['la muneca', 'muneca']],
+  ['Parc. El Raso', ['el raso']],
+  ['Villas Las Camelias', ['camelias']],
   ['Pedro Manuel Arcaya', ['pedro manuel', 'arcaya']],
   ['Villas María José', ['maria jose']],
   ['Niño Moisés', ['nino moises']],
@@ -2287,7 +2295,8 @@ function acmCalle(x) {
   x._calle = c;
   return c;
 }
-function acmClave(x) { return x.codigo + '|' + x.fecha; }
+// Vendidas: código|fecha (una propiedad puede venderse dos veces) · Publicadas: p:código
+function acmClave(x, clase) { return clase === 'p' ? 'p:' + x.codigo : x.codigo + '|' + x.fecha; }
 function acmM2(x) { return E.acmF.base === 'construccion' ? (Number(x.area) || 0) : (Number(x.terreno) || 0); }
 function acmM2Inm() { var F = E.acmF; return Number(numero(F.base === 'construccion' ? F.m2c : F.m2t)) || 0; }
 function acmDesde() {
@@ -2298,11 +2307,13 @@ function acmDesde() {
 }
 function fechaCorta(f) { var p = String(f || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0].slice(2) : f; }
 function r500(n) { return Math.round(n / 500) * 500; }
-function acmCandidatos(conZona) {
+function acmFuente(clase) { return ((E.acm && (clase === 'p' ? E.acm.publicados : E.acm.cierres)) || []); }
+function acmCandidatos(clase, conZona) {
   var F = E.acmF, desde = acmDesde(), m2 = acmM2Inm();
   var pal = CHAT.norm(F.buscar).split(' ').filter(Boolean);
-  return ((E.acm && E.acm.cierres) || []).filter(function (x) {
-    if (x.operacion !== F.op || x.fecha < desde) return false;
+  var lista = acmFuente(clase).filter(function (x) {
+    if (x.operacion !== F.op) return false;
+    if (clase === 'v' && x.fecha < desde) return false;
     if (F.tipo !== 'Todos' && x.tipo !== F.tipo) return false;
     if (conZona && F.zona && acmSector(x) !== F.zona) return false;
     if (pal.length) {
@@ -2311,16 +2322,27 @@ function acmCandidatos(conZona) {
     }
     if (F.parecido && m2) { var v = acmM2(x); if (!v || v < m2 * 0.5 || v > m2 * 1.5) return false; }
     return true;
-  }).sort(function (a, b) { return a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0; });
+  });
+  if (clase === 'v') return lista.sort(function (a, b) { return a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0; });
+  // Publicadas: de más barato a más caro por m² (las que no tienen m², al final)
+  return lista.sort(function (a, b) { var pa = acmM2(a) ? a.precio / acmM2(a) : 1e12, pb = acmM2(b) ? b.precio / acmM2(b) : 1e12; return pa - pb; });
 }
 function acmElegidos() {
   var F = E.acmF, out = [];
-  ((E.acm && E.acm.cierres) || []).forEach(function (x) {
-    if (F.sel[acmClave(x)]) out.push({ x: x, m2: acmM2(x), monto: x.monto, capt: x.captacion, fecha: x.fecha, desc: x.titulo || (x.tipo + ' · ' + x.zona), sector: acmSector(x), calle: acmCalle(x), codigo: x.codigo });
+  ['v', 'p'].forEach(function (clase) {
+    acmFuente(clase).forEach(function (x) {
+      var k = acmClave(x, clase);
+      if (!F.sel[k]) return;
+      out.push({ clase: clase, clave: k, m2: acmM2(x), monto: clase === 'p' ? x.precio : x.monto, capt: clase === 'p' ? 0 : x.captacion, fecha: clase === 'p' ? '' : x.fecha,
+        desc: x.titulo || (x.tipo + ' · ' + (x.zona || '')), sector: acmSector(x), calle: acmCalle(x), codigo: x.codigo });
+    });
   });
-  F.manual.forEach(function (m, i) { out.push({ manual: true, i: i, m2: Number(m.m2) || 0, monto: Number(m.precio) || 0, capt: Number(m.capt) || 0, fecha: m.fecha || '', desc: m.desc || 'Comparable a mano', sector: 'A mano', calle: '' }); });
+  F.manual.forEach(function (m, i) {
+    out.push({ clase: m.clase === 'p' ? 'p' : 'v', manual: true, i: i, m2: Number(m.m2) || 0, monto: Number(m.precio) || 0, capt: Number(m.capt) || 0, fecha: m.fecha || '',
+      desc: m.desc || 'Comparable a mano', sector: m.sector || 'A mano', calle: m.calle || '', codigo: m.codigo || '' });
+  });
   out.forEach(function (e) { e.pm2 = e.m2 && e.monto ? e.monto / e.m2 : 0; });
-  return out.sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
+  return out.sort(function (a, b) { return a.clase !== b.clase ? (a.clase === 'v' ? -1 : 1) : (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0); });
 }
 function acmStats(el) {
   var v = el.filter(function (e) { return e.pm2 > 0; }).map(function (e) { return e.pm2; }).sort(function (a, b) { return a - b; });
@@ -2330,26 +2352,48 @@ function acmStats(el) {
   return { n: k, min: v[0], max: v[k - 1], med: med, prom: v.reduce(function (s, a) { return s + a; }, 0) / k,
     ratio: rs.length ? rs.reduce(function (s, a) { return s + a; }, 0) / rs.length : 0 };
 }
-function acmValores(st) {
-  var m2 = acmM2Inm(), aj = Number(numero(E.acmF.ajuste)) || 0, f = 1 + aj / 100;
-  if (!st || !m2) return null;
-  var v = { m2: m2, aj: aj, valor: r500(st.med * m2 * f), min: r500(st.min * m2 * f), max: r500(st.max * m2 * f) };
-  v.capt = st.ratio > 0.5 && st.ratio < 1.2 ? r500(st.med * m2 * f / st.ratio) : 0;
-  return v;
+/* Todo el cálculo en un solo lugar (pantalla, hoja impresa, WhatsApp y guardado usan lo mismo) */
+function acmCalculo() {
+  var el = acmElegidos(), V = el.filter(function (e) { return e.clase === 'v'; }), Pu = el.filter(function (e) { return e.clase === 'p'; });
+  var stV = acmStats(V), stP = acmStats(Pu), m2 = acmM2Inm(), aj = Number(numero(E.acmF.ajuste)) || 0, f = 1 + aj / 100;
+  var c = { el: el, V: V, P: Pu, stV: stV, stP: stP, m2: m2, aj: aj };
+  if (stV && m2) {
+    c.valor = r500(stV.med * m2 * f); c.min = r500(stV.min * m2 * f); c.max = r500(stV.max * m2 * f);
+    if (stV.ratio > 0.5 && stV.ratio < 1.2) c.capt = r500(stV.med * m2 * f / stV.ratio);
+  }
+  if (stP && m2) c.valorP = r500(stP.med * m2 * f);
+  if (stV && stP) c.brecha = stP.med / stV.med - 1;
+  // Cómo queda la captación sugerida frente a los publicados marcados
+  var precioRef = c.capt || c.valor;
+  if (precioRef && m2 && Pu.length) {
+    var pm2 = precioRef / m2, conM2 = Pu.filter(function (e) { return e.pm2 > 0; });
+    c.masBarato = conM2.filter(function (e) { return e.pm2 > pm2; }).length; c.nPubM2 = conM2.length;
+  }
+  return c;
 }
 function acmSeg(clave, ops) {
   return '<div class="seg" data-acmseg="' + clave + '">' + ops.map(function (o) { return '<button data-v="' + esc(o[0]) + '" class="' + (E.acmF[clave] === o[0] ? 'on' : '') + '">' + o[1] + '</button>'; }).join('') + '</div>';
 }
+function acmPaginas(total, pag) {
+  var n = Math.ceil(total / ACM_POR_PAGINA);
+  if (n <= 1) return '';
+  var h = '<div class="acm-pag"><button class="btn chico" data-acm-pag="' + (pag - 1) + '"' + (pag <= 1 ? ' disabled' : '') + '>‹ Anterior</button>';
+  for (var i = 1; i <= n; i++) {
+    if (n > 9 && i > 2 && i < n - 1 && Math.abs(i - pag) > 1) { if (i === 3 || i === n - 2) h += '<span class="muted">…</span>'; continue; }
+    h += '<button class="btn chico' + (i === pag ? ' pri' : '') + '" data-acm-pag="' + i + '">' + i + '</button>';
+  }
+  return h + '<button class="btn chico" data-acm-pag="' + (pag + 1) + '"' + (pag >= n ? ' disabled' : '') + '>Siguiente ›</button></div>';
+}
 function vAcm() {
   var F = E.acmF, h = '<div class="no-imprimir">';
-  h += '<div class="barra-acc"><div><h2 style="margin:0">ACM</h2><p class="sub" style="margin:2px 0 0">Ventas cerradas en el sistema (precio real), con el título, la dirección y los metros de Novus. Marca solo las que de verdad se parecen.</p></div>';
-  h += '<div style="display:flex;gap:8px"><button class="btn" data-acm-nuevo>Empezar otro</button><button class="btn pri" data-acm-imprimir>Imprimir</button></div></div>';
+  h += '<div class="barra-acc"><div><h2 style="margin:0">ACM' + (F.id ? ' <span class="chip verde" style="vertical-align:middle">guardado</span>' : '') + '</h2><p class="sub" style="margin:2px 0 0">Lo vendido (precio real de cierre) y lo publicado hoy (precio pedido), por separado. Marca solo lo que de verdad se parece.</p></div>';
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-acm-nuevo>Empezar otro</button><button class="btn" data-acm-guardados>Guardados</button><button class="btn" data-acm-guardar>Guardar</button><button class="btn" data-acm-compartir>WhatsApp</button><button class="btn pri" data-acm-imprimir>Imprimir / PDF</button></div></div>';
   if (!E.acm) { setTimeout(cargarAcm, 0); return h + '<div class="grid g2"><div class="esqueleto"></div><div class="esqueleto"></div></div></div>'; }
-  if (E.acm.error) return h + '<div class="card"><b>No pude cargar los cierres.</b><p class="muted">' + esc(E.acm.error) + '</p><button class="btn pri" data-acm-recargar>Reintentar</button></div></div>';
+  if (E.acm.error) return h + '<div class="card"><b>No pude cargar los datos.</b><p class="muted">' + esc(E.acm.error) + '</p><button class="btn pri" data-acm-recargar>Reintentar</button></div></div>';
 
   // 1. Inmueble a valorar
   var cuenta = {};
-  E.acm.cierres.forEach(function (x) { if (x.tipo) cuenta[x.tipo] = (cuenta[x.tipo] || 0) + 1; });
+  acmFuente('v').concat(acmFuente('p')).forEach(function (x) { if (x.tipo) cuenta[x.tipo] = (cuenta[x.tipo] || 0) + 1; });
   var tipos = Object.keys(cuenta).sort(function (a, b) { return cuenta[b] - cuenta[a]; });
   if (F.tipo !== 'Todos' && tipos.indexOf(F.tipo) < 0) tipos.unshift(F.tipo);
   function opt(v, t, act) { return '<option value="' + esc(v) + '"' + (v === act ? ' selected' : '') + '>' + esc(t) + '</option>'; }
@@ -2365,106 +2409,217 @@ function vAcm() {
   h += '</div></div>';
 
   // 2. Resultado
-  var el = acmElegidos(), st = acmStats(el), val = acmValores(st), queM2 = F.base === 'construccion' ? 'de construcción' : 'de terreno';
-  h += '<div class="card acm-res" style="margin-bottom:16px"><div class="card-t"><b>Resultado</b><span class="chip ' + (el.length ? 'azul' : '') + '">' + el.length + ' comparable' + (el.length === 1 ? '' : 's') + '</span></div>';
-  if (!el.length) h += '<p class="muted" style="margin:0">Marca abajo las ventas que se parecen al inmueble, o agrega una a mano, y aquí sale el valor.</p>';
+  var C = acmCalculo(), queM2 = F.base === 'construccion' ? 'de construcción' : 'de terreno';
+  h += '<div class="card acm-res" style="margin-bottom:16px"><div class="card-t"><b>Resultado</b><span class="chip ' + (C.el.length ? 'azul' : '') + '">' + C.V.length + ' vendida' + (C.V.length === 1 ? '' : 's') + ' · ' + C.P.length + ' publicada' + (C.P.length === 1 ? '' : 's') + '</span></div>';
+  if (!C.el.length) h += '<p class="muted" style="margin:0">Marca abajo lo vendido y lo publicado que se parece al inmueble, o agrégalo a mano, y aquí sale el valor.</p>';
   else {
-    if (st) {
-      h += '<div class="grid g4" style="margin-bottom:12px">' + kpi('$/m² mediana', d0(st.med)) + kpi('Rango $/m²', d0(st.min) + ' – ' + d0(st.max), true) + kpi('Promedio $/m²', d0(st.prom), true) +
-        (st.ratio ? kpi('Se cerraron al', pct(st.ratio) + ' de lo captado', true) : '') + '</div>';
-      if (val) {
-        h += '<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-end">';
-        h += '<div><div class="muted" style="font-size:12px">Valor estimado · ' + fmt0.format(val.m2) + ' m² × mediana' + (val.aj ? ' · ajuste ' + (val.aj > 0 ? '+' : '') + val.aj + '%' : '') + '</div><div class="grande num">' + d0(val.valor) + '</div><div class="muted" style="font-size:12px">Rango ' + d0(val.min) + ' – ' + d0(val.max) + '</div></div>';
-        if (val.capt) h += '<div><div class="muted" style="font-size:12px">Captación sugerida</div><div class="grande num" style="color:var(--rojo)">' + d0(val.capt) + '</div><div class="muted" style="font-size:12px">si se negocia como estos, cierra cerca del valor</div></div>';
-        h += '</div>';
-      } else h += '<div class="aviso info" style="margin:0">Escribe los m² ' + queM2 + ' del inmueble para calcular el valor.</div>';
-    } else h += '<div class="aviso" style="margin:0">Los comparables marcados no tienen m² ' + queM2 + ' en Novus.</div>';
-    h += '<div class="acm-elegidos" style="margin-top:12px">' + el.map(function (e) {
-      return '<div class="item"><div><b>' + esc(e.sector) + '</b>' + (e.calle ? ' · ' + esc(e.calle) : '') + ' · ' + esc(e.desc) +
-        '<div class="muted" style="font-size:12px">' + (e.fecha ? fechaCorta(e.fecha) + ' · ' : '') + (e.m2 ? fmt0.format(e.m2) + ' m² · ' : 'sin m² · ') + d0(e.monto) + (e.pm2 ? ' · <b>' + d0(e.pm2) + '/m²</b>' : '') + (e.codigo ? ' · #' + esc(e.codigo) : '') + '</div></div>' +
-        '<button class="quitar" title="Quitar" data-acm-quitar="' + (e.manual ? 'm:' + e.i : esc(acmClave(e.x))) + '">×</button></div>';
+    function bloque(tit, sub, st, valor, color) {
+      var b = '<div class="acm-bloque" style="border-left-color:' + color + '"><div class="muted" style="font-size:12px;font-weight:600">' + tit + '</div>';
+      if (!st) return b + '<div class="muted" style="font-size:13px;margin-top:4px">' + sub + '</div></div>';
+      b += '<div class="v num">' + d0(st.med) + '<span class="muted" style="font-size:13px;font-weight:500"> /m² mediana</span></div>';
+      b += '<div class="muted" style="font-size:12px">' + st.n + ' con m² · rango ' + d0(st.min) + ' – ' + d0(st.max) + (valor ? ' · para tus m²: <b style="color:var(--texto)">' + d0(valor) + '</b>' : '') + '</div>';
+      return b + '</div>';
+    }
+    h += '<div class="grid g2" style="margin-bottom:10px">';
+    h += bloque('SE CIERRA EN · vendidas', C.V.length ? 'Las vendidas marcadas no tienen m² ' + queM2 + '.' : 'Marca ventas cerradas para saber cuánto se paga de verdad.', C.stV, C.valor, 'var(--azul-2)');
+    h += bloque('HOY SE PIDE · publicadas', C.P.length ? 'Las publicadas marcadas no tienen m² ' + queM2 + '.' : 'Marca publicados para ver contra qué compite.', C.stP, C.valorP, 'var(--ambar)');
+    h += '</div>';
+    if (C.brecha !== undefined) h += '<div class="aviso info" style="margin-bottom:10px">Lo publicado está <b>' + (C.brecha >= 0 ? pct(C.brecha) + ' por encima' : pct(-C.brecha) + ' por debajo') + '</b> de lo que se cierra.' + (C.stV && C.stV.ratio ? ' Las ventas marcadas se cerraron al <b>' + pct(C.stV.ratio) + '</b> de lo que se pedía.' : '') + '</div>';
+    if (C.valor) {
+      h += '<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-end">';
+      h += '<div><div class="muted" style="font-size:12px">Valor estimado · ' + fmt0.format(C.m2) + ' m² × mediana de vendidas' + (C.aj ? ' · ajuste ' + (C.aj > 0 ? '+' : '') + C.aj + '%' : '') + '</div><div class="grande num">' + d0(C.valor) + '</div><div class="muted" style="font-size:12px">Rango ' + d0(C.min) + ' – ' + d0(C.max) + '</div></div>';
+      if (C.capt) h += '<div><div class="muted" style="font-size:12px">Captación sugerida</div><div class="grande num" style="color:var(--rojo)">' + d0(C.capt) + '</div><div class="muted" style="font-size:12px">si se negocia como estas, cierra cerca del valor</div></div>';
+      h += '</div>';
+      if (C.nPubM2) h += '<p style="margin:10px 0 0;font-size:13px">Con ' + d0(C.capt || C.valor) + ' quedaría <b>más barato que ' + C.masBarato + ' de ' + C.nPubM2 + '</b> publicado' + (C.nPubM2 === 1 ? '' : 's') + ' parecido' + (C.nPubM2 === 1 ? '' : 's') + '.</p>';
+    } else if (C.stV && !C.m2) h += '<div class="aviso info" style="margin:0">Escribe los m² ' + queM2 + ' del inmueble para calcular el valor.</div>';
+    else if (!C.stV && C.stP) h += '<div class="aviso" style="margin:0">Solo hay publicadas: eso es lo que piden, no lo que se paga. Marca ventas cerradas para calcular el valor.</div>';
+    h += '<div class="acm-elegidos" style="margin-top:12px">' + C.el.map(function (e) {
+      return '<div class="item"><div><span class="chip ' + (e.clase === 'p' ? 'ambar' : 'azul') + '" style="font-size:11px;padding:1px 6px">' + (e.clase === 'p' ? 'Publicada' : 'Vendida') + '</span> <b>' + esc(e.sector) + '</b>' + (e.calle ? ' · ' + esc(e.calle) : '') + ' · ' + esc(e.desc) +
+        '<div class="muted" style="font-size:12px">' + (e.fecha ? fechaCorta(e.fecha) + ' · ' : '') + (e.m2 ? fmt0.format(e.m2) + ' m² · ' : 'sin m² · ') + (e.clase === 'p' ? 'pide ' : '') + d0(e.monto) + (e.pm2 ? ' · <b>' + d0(e.pm2) + '/m²</b>' : '') + (e.codigo ? ' · #' + esc(e.codigo) : '') + '</div></div>' +
+        '<button class="quitar" title="Quitar" data-acm-quitar="' + (e.manual ? 'm:' + e.i : esc(e.clave)) + '">×</button></div>';
     }).join('') + '</div>';
   }
-  h += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn chico" data-acm-manual>+ Agregar comparable a mano</button>' + (el.length ? '<button class="btn chico" data-acm-ninguno>Quitar todos</button>' : '') + '</div>';
+  h += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn chico" data-acm-manual>+ Agregar comparable a mano</button>' + (C.el.length ? '<button class="btn chico" data-acm-ninguno>Quitar todos</button>' : '') + '</div>';
   h += '</div>';
 
-  // 3. Ventas para comparar
-  var base = acmCandidatos(false), lista = acmCandidatos(true), zonas = {};
+  // 3. Lista para comparar (vendidas o publicadas), en páginas de 20
+  var clase = F.lista === 'p' ? 'p' : 'v';
+  var nV = acmCandidatos('v', true).length, nP = acmCandidatos('p', true).length;
+  var base = acmCandidatos(clase, false), lista = acmCandidatos(clase, true), zonas = {};
   base.forEach(function (x) { var s = acmSector(x); zonas[s] = (zonas[s] || 0) + 1; });
-  h += '<h3>Ventas cerradas para comparar</h3>';
-  h += '<div class="barra-filtros">' + acmSeg('desde', [['anio', 'Este año'], ['6m', 'Últimos 6 meses'], ['anterior', 'Desde el año pasado']]);
+  h += '<div class="barra-filtros">' + acmSeg('lista', [['v', 'Vendidas (' + nV + ')'], ['p', 'Publicadas hoy (' + nP + ')']]);
+  if (clase === 'v') h += acmSeg('desde', [['anio', 'Este año'], ['6m', 'Últimos 6 meses'], ['anterior', 'Desde el año pasado']]);
+  h += '</div><div class="barra-filtros">';
   h += '<input class="buscar" id="acmBuscar" placeholder="Buscar en título o dirección: tocuyo, mamporal, código…" value="' + esc(F.buscar) + '">';
   h += '<label style="display:flex;gap:6px;align-items:center;font-size:13px;font-weight:600;color:var(--suave)"><input type="checkbox" id="acmParecido"' + (F.parecido ? ' checked' : '') + '> Tamaño parecido (±50%)</label></div>';
   var zk = Object.keys(zonas).sort(function (a, b) { return zonas[b] - zonas[a]; });
   if (zk.length > 1 || F.zona) h += '<div class="acm-zonas"><button data-acm-zona=""' + (F.zona ? '' : ' class="on"') + '>Todas (' + base.length + ')</button>' +
     zk.map(function (z) { return '<button data-acm-zona="' + esc(z) + '"' + (F.zona === z ? ' class="on"' : '') + '>' + esc(z) + ' (' + zonas[z] + ')</button>'; }).join('') + '</div>';
-  if (!lista.length) h += '<div class="card vacio">No hay ventas con estos filtros.</div>';
+  if (!lista.length) h += '<div class="card vacio">' + (clase === 'p' && !acmFuente('p').length ? 'No hay inventario activo cargado. Súbelo en <a href="#" data-ir="chat">Chat y matches</a>.' : 'No hay ' + (clase === 'p' ? 'publicados' : 'ventas') + ' con estos filtros.') + '</div>';
   else {
-    var max = 200;
-    h += '<div class="barra-acc" style="margin-bottom:8px"><span class="muted" style="font-size:13px">' + lista.length + ' venta' + (lista.length === 1 ? '' : 's') + ' · la zona sale del título del inmueble</span><button class="btn chico" data-acm-todos>Marcar las ' + Math.min(lista.length, max) + ' que se ven</button></div>';
-    h += '<div class="card pad0"><div class="tabla-wrap"><table class="acm-tabla"><thead><tr><th></th><th>Fecha</th><th>Inmueble</th><th class="d">m² ' + (F.base === 'construccion' ? 'constr.' : 'terreno') + '</th><th class="d ocultar-movil">Captación</th><th class="d">Venta</th><th class="d">$/m²</th></tr></thead><tbody>';
-    lista.slice(0, max).forEach(function (x) {
-      var k = acmClave(x), on = !!F.sel[k], m2 = acmM2(x), calle = acmCalle(x);
+    var nPag = Math.ceil(lista.length / ACM_POR_PAGINA), pag = Math.min(Math.max(1, F.pag || 1), nPag);
+    var pagina = lista.slice((pag - 1) * ACM_POR_PAGINA, pag * ACM_POR_PAGINA);
+    h += '<div class="barra-acc" style="margin-bottom:8px"><span class="muted" style="font-size:13px">' + lista.length + (clase === 'p' ? ' publicado' : ' venta') + (lista.length === 1 ? '' : 's') + (nPag > 1 ? ' · página ' + pag + ' de ' + nPag : '') + ' · la zona sale del título' + (clase === 'p' ? ' · de más barato a más caro por m²' : '') + '</span><button class="btn chico" data-acm-todos>Marcar las ' + pagina.length + ' de esta página</button></div>';
+    h += '<div class="card pad0"><div class="tabla-wrap"><table class="acm-tabla"><thead><tr><th></th><th>' + (clase === 'p' ? 'Agencia' : 'Fecha') + '</th><th>Inmueble</th><th class="d">m² ' + (F.base === 'construccion' ? 'constr.' : 'terreno') + '</th>' +
+      (clase === 'v' ? '<th class="d ocultar-movil">Captación</th><th class="d">Venta</th>' : '<th class="d">Pide</th>') + '<th class="d">$/m²</th></tr></thead><tbody>';
+    pagina.forEach(function (x) {
+      var k = acmClave(x, clase), on = !!F.sel[k], m2 = acmM2(x), calle = acmCalle(x), monto = clase === 'p' ? x.precio : x.monto;
       var otro = F.base === 'construccion' ? (x.terreno ? fmt0.format(x.terreno) + ' terreno' : '') : (x.area ? fmt0.format(x.area) + ' constr.' : '');
       h += '<tr class="click' + (on ? ' sel' : '') + '" data-acm-sel="' + esc(k) + '"><td><input type="checkbox"' + (on ? ' checked' : '') + ' tabindex="-1"></td>' +
-        '<td class="num" style="white-space:nowrap">' + fechaCorta(x.fecha) + '</td>' +
-        '<td><span class="chip azul">' + esc(acmSector(x)) + '</span>' + (calle ? ' <span class="chip">' + esc(calle) + '</span>' : '') +
+        '<td class="num" style="white-space:nowrap">' + (clase === 'p' ? esc(x.agencia) : fechaCorta(x.fecha)) + '</td>' +
+        '<td><span class="chip ' + (clase === 'p' ? 'ambar' : 'azul') + '">' + esc(acmSector(x)) + '</span>' + (calle ? ' <span class="chip">' + esc(calle) + '</span>' : '') +
         '<div class="acm-tit">' + (x.titulo ? esc(x.titulo) : '<span class="muted">Sin datos en Novus</span> · ' + esc(x.tipo)) + '</div>' +
-        '<div class="acm-dir">' + (x.direccion ? esc(x.direccion) + ' · ' : '') + 'Novus: ' + esc(x.zona || '—') + ' · #' + esc(x.codigo) + '</div></td>' +
+        '<div class="acm-dir">' + (x.direccion ? esc(x.direccion) + ' · ' : '') + (clase === 'v' ? 'Novus: ' + esc(x.zona || '—') + ' · ' : esc(corto(x.agente)) + ' · ') + '#' + esc(x.codigo) + '</div></td>' +
         '<td class="d num">' + (m2 ? fmt0.format(m2) : '<span class="muted">—</span>') + (otro ? '<div class="muted" style="font-size:11px">' + otro + '</div>' : '') + '</td>' +
-        '<td class="d num ocultar-movil">' + (x.captacion ? d0(x.captacion) : '<span class="muted">—</span>') + '</td>' +
-        '<td class="d num"><b>' + d0(x.monto) + '</b></td>' +
-        '<td class="d num">' + (m2 ? d0(x.monto / m2) : '<span class="muted">—</span>') + '</td></tr>';
+        (clase === 'v' ? '<td class="d num ocultar-movil">' + (x.captacion ? d0(x.captacion) : '<span class="muted">—</span>') + '</td>' : '') +
+        '<td class="d num"><b>' + d0(monto) + '</b></td>' +
+        '<td class="d num">' + (m2 ? d0(monto / m2) : '<span class="muted">—</span>') + '</td></tr>';
     });
     h += '</tbody></table></div></div>';
-    if (lista.length > max) h += '<p class="muted" style="font-size:12px">Se muestran las ' + max + ' más recientes. Usa el buscador o la zona para ver las demás.</p>';
+    h += acmPaginas(lista.length, pag);
   }
-  h += '<p class="muted" style="font-size:12px;margin-top:10px">Si una venta sale "Sin datos en Novus", falta cargar el listado de inmuebles vendidos en <a href="#" data-ir="chat">Chat y matches</a> → Cargar chat o inventario.</p>';
+  h += '<p class="muted" style="font-size:12px;margin-top:10px">' + (clase === 'v' ? 'Si una venta sale "Sin datos en Novus", falta cargar el listado de inmuebles vendidos' : 'Los publicados son el inventario activo de Avanti y Avanti II. Para actualizarlo, carga el listado de activos') + ' en <a href="#" data-ir="chat">Chat y matches</a> → Cargar chat o inventario. Los de otras oficinas se agregan a mano.</p>';
   h += '</div>';
-  return h + acmHoja(el, st, val);
+  return h + acmHoja(C);
 }
-function acmHoja(el, st, val) {
-  var F = E.acmF, hoy = new Date();
+function acmHoja(C) {
+  var F = E.acmF, hoy = new Date(), queM2 = F.base === 'construccion' ? 'de construcción' : 'de terreno';
   var h = '<div class="solo-impresion hoja hoja-acm">';
   h += '<div class="cab-acm"><div><div style="font-weight:800;color:var(--rojo)">RE/MAX Avanti</div><h1 style="margin:2px 0 0">Análisis comparativo de mercado</h1></div><div style="text-align:right;font-size:12px">' + fechaCorta(hoy.toISOString().slice(0, 10)) + (E.datos && E.datos.usuario ? '<br>' + esc(E.datos.usuario) : '') + '</div></div>';
   h += '<p style="margin:0 0 4px;font-size:13px"><b>Inmueble:</b> ' + esc(F.titulo || '—') + '</p>';
   h += '<p style="margin:0;font-size:12px" class="muted">' + esc(F.tipo === 'Todos' ? '' : F.tipo + ' · ') + esc(F.op) + (Number(numero(F.m2t)) ? ' · ' + fmt0.format(numero(F.m2t)) + ' m² de terreno' : '') + (Number(numero(F.m2c)) ? ' · ' + fmt0.format(numero(F.m2c)) + ' m² de construcción' : '') + '</p>';
-  if (st) {
-    h += '<div class="cifras-acm"><div>Valor estimado<b>' + (val ? d0(val.valor) : '—') + '</b>' + (val ? '<span style="font-size:11px">Rango ' + d0(val.min) + ' – ' + d0(val.max) + '</span>' : '') + '</div>';
-    h += '<div>$/m² ' + (F.base === 'construccion' ? 'de construcción' : 'de terreno') + ' (mediana)<b>' + d0(st.med) + '</b><span style="font-size:11px">' + st.n + ' comparables · ' + d0(st.min) + ' – ' + d0(st.max) + '</span></div>';
-    h += '<div>Precio de captación sugerido<b>' + (val && val.capt ? d0(val.capt) : '—') + '</b>' + (st.ratio ? '<span style="font-size:11px">Estos se cerraron al ' + pct(st.ratio) + ' de lo captado</span>' : '') + '</div></div>';
+  h += '<div class="cifras-acm">';
+  h += '<div>Valor estimado<b>' + (C.valor ? d0(C.valor) : '—') + '</b>' + (C.valor ? '<span style="font-size:11px">Rango ' + d0(C.min) + ' – ' + d0(C.max) + '</span>' : '') + '</div>';
+  h += '<div>Se cierra en (vendidas)<b>' + (C.stV ? d0(C.stV.med) + '/m²' : '—') + '</b><span style="font-size:11px">' + (C.stV ? C.stV.n + ' ventas · ' + d0(C.stV.min) + ' – ' + d0(C.stV.max) : '') + '</span></div>';
+  h += '<div>Hoy se pide (publicadas)<b>' + (C.stP ? d0(C.stP.med) + '/m²' : '—') + '</b><span style="font-size:11px">' + (C.stP ? C.stP.n + ' publicados · ' + d0(C.stP.min) + ' – ' + d0(C.stP.max) : '') + '</span></div>';
+  h += '<div>Precio de captación sugerido<b>' + (C.capt ? d0(C.capt) : '—') + '</b><span style="font-size:11px">' + (C.stV && C.stV.ratio ? 'Las ventas se cerraron al ' + pct(C.stV.ratio) + ' de lo captado' : '') + '</span></div>';
+  h += '</div>';
+  var notas = [];
+  if (C.brecha !== undefined) notas.push('Lo publicado está ' + (C.brecha >= 0 ? pct(C.brecha) + ' por encima' : pct(-C.brecha) + ' por debajo') + ' de lo que se cierra (por m² ' + queM2 + ').');
+  if (C.nPubM2) notas.push('Con ' + d0(C.capt || C.valor) + ' quedaría más barato que ' + C.masBarato + ' de ' + C.nPubM2 + ' publicados parecidos.');
+  if (C.aj) notas.push('Ajuste aplicado: ' + (C.aj > 0 ? '+' : '') + C.aj + '%' + (F.nota ? ' (' + esc(F.nota) + ')' : '') + '.');
+  if (notas.length) h += '<p style="font-size:12px;margin:0 0 10px">' + notas.join(' ') + '</p>';
+  function tabla(tit, lista, pide) {
+    if (!lista.length) return '';
+    var t = '<div style="font-weight:800;color:var(--azul);font-size:12px;margin:12px 0 4px">' + tit + '</div><table><thead><tr><th>' + (pide ? 'Código' : 'Fecha') + '</th><th>Comparable</th><th class="d">m²</th><th class="d">' + (pide ? 'Precio pedido' : 'Precio de cierre') + '</th><th class="d">$/m²</th></tr></thead><tbody>';
+    lista.forEach(function (e) {
+      t += '<tr><td>' + (pide ? esc(e.codigo ? '#' + e.codigo : '') : (e.fecha ? fechaCorta(e.fecha) : '')) + '</td><td><b>' + esc(e.sector) + '</b>' + (e.calle ? ' · ' + esc(e.calle) : '') + '<br>' + esc(e.desc) + '</td><td class="d">' + (e.m2 ? fmt0.format(e.m2) : '—') + '</td><td class="d">' + d0(e.monto) + '</td><td class="d">' + (e.pm2 ? d0(e.pm2) : '—') + '</td></tr>';
+    });
+    return t + '</tbody></table>';
   }
-  if (val && val.aj) h += '<p style="font-size:12px;margin:0 0 10px"><b>Ajuste aplicado:</b> ' + (val.aj > 0 ? '+' : '') + val.aj + '%' + (F.nota ? ' (' + esc(F.nota) + ')' : '') + '</p>';
-  h += '<table><thead><tr><th>Fecha</th><th>Comparable</th><th class="d">m²</th><th class="d">Precio de cierre</th><th class="d">$/m²</th></tr></thead><tbody>';
-  el.forEach(function (e) {
-    h += '<tr><td>' + (e.fecha ? fechaCorta(e.fecha) : '') + '</td><td><b>' + esc(e.sector) + '</b>' + (e.calle ? ' · ' + esc(e.calle) : '') + '<br>' + esc(e.desc) + '</td><td class="d">' + (e.m2 ? fmt0.format(e.m2) : '—') + '</td><td class="d">' + d0(e.monto) + '</td><td class="d">' + (e.pm2 ? d0(e.pm2) : '—') + '</td></tr>';
-  });
-  h += '</tbody></table>';
-  h += '<p style="font-size:10.5px;color:#555;margin-top:12px">Comparables: ventas cerradas por REMAX Avanti y REMAX Avanti II registradas en el sistema RE/MAX, a precio real de cierre. Metros según el registro de cada inmueble en Novus. El valor es una referencia de mercado, no un avalúo.</p>';
+  h += tabla('VENDIDAS · precio real de cierre', C.V, false) + tabla('PUBLICADAS HOY · precio pedido', C.P, true);
+  h += '<p style="font-size:10.5px;color:#555;margin-top:12px">Vendidas: cierres de REMAX Avanti y REMAX Avanti II registrados en el sistema RE/MAX. Publicadas: inmuebles activos en Novus y otros agregados por el asesor. Metros según el registro de cada inmueble. El valor es una referencia de mercado, no un avalúo.</p>';
   return h + '</div>';
+}
+/* Texto para mandar por WhatsApp */
+function acmTexto() {
+  var F = E.acmF, C = acmCalculo(), queM2 = F.base === 'construccion' ? 'de construcción' : 'de terreno', L = [];
+  L.push('*ACM · RE/MAX Avanti*');
+  if (F.titulo) L.push(F.titulo);
+  if (C.m2) L.push(fmt0.format(C.m2) + ' m² ' + queM2 + (F.tipo !== 'Todos' ? ' · ' + F.tipo : '') + ' · ' + F.op);
+  L.push('');
+  if (C.valor) L.push('*Valor estimado:* ' + d0(C.valor) + ' (rango ' + d0(C.min) + ' – ' + d0(C.max) + ')');
+  if (C.capt) L.push('*Captación sugerida:* ' + d0(C.capt));
+  if (C.stV) L.push('Se cierra en: ' + d0(C.stV.med) + '/m² (' + C.stV.n + ' ventas)');
+  if (C.stP) L.push('Hoy se pide: ' + d0(C.stP.med) + '/m² (' + C.stP.n + ' publicados)');
+  if (C.brecha !== undefined) L.push('Lo publicado está ' + (C.brecha >= 0 ? pct(C.brecha) + ' por encima' : pct(-C.brecha) + ' por debajo') + ' de lo que se cierra.');
+  if (C.aj) L.push('Ajuste ' + (C.aj > 0 ? '+' : '') + C.aj + '%' + (F.nota ? ': ' + F.nota : ''));
+  function linea(e) { return '• ' + (e.fecha ? fechaCorta(e.fecha) + ' · ' : '') + e.sector + (e.calle ? ', ' + e.calle : '') + ' · ' + (e.m2 ? fmt0.format(e.m2) + ' m² · ' : '') + d0(e.monto) + (e.pm2 ? ' (' + d0(e.pm2) + '/m²)' : ''); }
+  if (C.V.length) { L.push(''); L.push('_Vendidas (precio de cierre):_'); C.V.forEach(function (e) { L.push(linea(e)); }); }
+  if (C.P.length) { L.push(''); L.push('_Publicadas hoy (precio pedido):_'); C.P.forEach(function (e) { L.push(linea(e)); }); }
+  return L.join('\n');
+}
+function abrirAcmCompartir() {
+  if (!acmElegidos().length) { toast('Marca primero los comparables'); return; }
+  var t = acmTexto();
+  $('#tituloSaldo').textContent = 'Compartir ACM';
+  $('#cuerpoSaldo').innerHTML = '<pre class="msg" style="max-height:45vh;overflow:auto;font-size:13px">' + esc(t) + '</pre>' +
+    '<p class="muted" style="font-size:12px;margin:8px 0 0">Para mandarlo como PDF: Imprimir / PDF → Guardar como PDF, y adjunta ese archivo.</p>' +
+    '<div class="acciones" style="flex-wrap:wrap"><button class="btn" id="acmCopiar">Copiar</button>' + (navigator.share ? '<button class="btn" id="acmShare">Compartir…</button>' : '') + '<a class="btn pri" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(t) + '">Abrir WhatsApp</a></div>';
+  $('#modalSaldo').classList.add('on');
+  $('#acmCopiar').addEventListener('click', function () { (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { toast('Copiado'); }).catch(function () { toast('No pude copiar: selecciona el texto'); }); });
+  var sh = $('#acmShare');
+  if (sh) sh.addEventListener('click', function () { navigator.share({ title: 'ACM', text: t }).catch(function () {}); });
+}
+/* Guardar en la BASE CENTRAL (pestaña ACM) y volver a abrir */
+function acmGuardar(boton) {
+  var F = E.acmF, C = acmCalculo();
+  if (!C.el.length) { toast('Marca primero los comparables'); return; }
+  if (!F.titulo) { toast('Escribe la descripción del inmueble'); var i = $('[data-acm="titulo"]'); if (i) i.focus(); return; }
+  var snap = C.el.map(function (e) { return { clave: e.manual ? '' : e.clave, clase: e.clase, desc: e.desc, sector: e.sector, calle: e.calle, m2: e.m2, precio: e.monto, capt: e.capt, fecha: e.fecha, codigo: e.codigo }; });
+  var datos = { F: Object.assign({}, F, { pag: 1 }), snap: snap };
+  if (boton) boton.disabled = true;
+  cargando(true);
+  api('app_acmGuardar', { id: F.id, titulo: F.titulo, tipo: F.tipo, m2: C.m2, valor: C.valor || C.valorP || 0, capt: C.capt || 0, nVendidas: C.V.length, nPublicadas: C.P.length, datos: datos }).then(function (r) {
+    cargando(false); F.id = r.id; guardarAcm(); toast('ACM guardado en la base central'); pintar();
+  }).catch(function (e) { cargando(false); if (boton) boton.disabled = false; toast('No se guardó: ' + (e.message || e), 6000); });
+}
+function abrirAcmGuardados() {
+  $('#tituloSaldo').textContent = 'ACM guardados';
+  $('#cuerpoSaldo').innerHTML = '<p class="muted">Cargando…</p>';
+  $('#modalSaldo').classList.add('on');
+  api('app_acmLista').then(function (lista) {
+    if (!lista.length) { $('#cuerpoSaldo').innerHTML = '<p class="muted">Todavía no hay ACM guardados.</p><div class="acciones"><button class="btn" data-cerrar>Cerrar</button></div>'; return; }
+    $('#cuerpoSaldo').innerHTML = lista.map(function (a, i) {
+      return '<div class="saldo-item"><div><b>' + esc(a.titulo || 'Sin descripción') + '</b><div class="muted" style="font-size:12px">' + esc(a.fecha) + ' · ' + esc(a.por) + (a.m2 ? ' · ' + fmt0.format(a.m2) + ' m²' : '') + (a.valor ? ' · valor ' + d0(a.valor) : '') + (a.capt ? ' · captar en ' + d0(a.capt) : '') + '</div></div>' +
+        '<div style="display:flex;gap:6px"><button class="btn chico pri" data-acm-abrir="' + i + '">Abrir</button><button class="btn chico peligro" data-acm-borrar="' + i + '">Borrar</button></div></div>';
+    }).join('');
+    $$('[data-acm-abrir]', $('#cuerpoSaldo')).forEach(function (b) { b.addEventListener('click', function () { abrirAcmGuardado(lista[Number(b.dataset.acmAbrir)]); }); });
+    $$('[data-acm-borrar]', $('#cuerpoSaldo')).forEach(function (b) {
+      b.addEventListener('click', function () {
+        var a = lista[Number(b.dataset.acmBorrar)];
+        if (b.dataset.seguro !== '1') { b.dataset.seguro = '1'; b.textContent = '¿Seguro?'; return; }
+        b.disabled = true;
+        api('app_acmBorrar', a.id).then(function () { if (E.acmF.id === a.id) { E.acmF.id = ''; guardarAcm(); } toast('Borrado'); abrirAcmGuardados(); })
+          .catch(function (e) { b.disabled = false; toast('No se borró: ' + (e.message || e), 5000); });
+      });
+    });
+  }).catch(function (e) { $('#cuerpoSaldo').innerHTML = '<p class="aviso">No pude leer los guardados: ' + esc(e.message || e) + '</p>'; });
+}
+function abrirAcmGuardado(a) {
+  var d = a.datos || {}, F = Object.assign({}, ACM_DEF, d.F || {}, { id: a.id, pag: 1 });
+  F.sel = Object.assign({}, F.sel || {}); F.manual = (F.manual || []).slice();
+  // Lo que ya no está en los datos de hoy (se vendió, se despublicó…) se conserva como comparable a mano
+  var hay = {};
+  ['v', 'p'].forEach(function (c) { acmFuente(c).forEach(function (x) { hay[acmClave(x, c)] = 1; }); });
+  (d.snap || []).forEach(function (s) {
+    if (!s.clave || hay[s.clave]) return;
+    delete F.sel[s.clave];
+    F.manual.push({ clase: s.clase, desc: s.desc, sector: s.sector, calle: s.calle, m2: s.m2, precio: s.precio, capt: s.capt, fecha: s.fecha, codigo: s.codigo });
+  });
+  E.acmF = F; guardarAcm();
+  $('#modalSaldo').classList.remove('on');
+  pintar(); window.scrollTo(0, 0);
+  toast('ACM abierto: ' + (a.titulo || ''));
 }
 function enlazarAcm() {
   var F = E.acmF;
   $$('[data-acm]').forEach(function (i) {
     i.addEventListener('change', function () {
       var k = i.dataset.acm; F[k] = i.value;
-      if (k === 'tipo') { F.base = /terreno|hacienda|finca/i.test(i.value) ? 'terreno' : (i.value === 'Todos' ? F.base : 'construccion'); F.zona = ''; }
-      if (k === 'op') F.zona = '';
+      if (k === 'tipo') { F.base = /terreno|hacienda|finca/i.test(i.value) ? 'terreno' : (i.value === 'Todos' ? F.base : 'construccion'); F.zona = ''; F.pag = 1; }
+      if (k === 'op') { F.zona = ''; F.pag = 1; }
       guardarAcm(); pintar();
     });
   });
   var bu = $('#acmBuscar');
   if (bu) bu.addEventListener('input', function () {
-    F.buscar = bu.value; guardarAcm();
+    F.buscar = bu.value; F.pag = 1; guardarAcm();
     var pos = bu.selectionStart; pintar();
     var nb = $('#acmBuscar'); if (nb) { nb.focus(); nb.setSelectionRange(pos, pos); }
   });
   var pa = $('#acmParecido');
-  if (pa) pa.addEventListener('change', function () { F.parecido = pa.checked; guardarAcm(); pintar(); });
+  if (pa) pa.addEventListener('change', function () { F.parecido = pa.checked; F.pag = 1; guardarAcm(); pintar(); });
   $$('[data-acmseg]').forEach(function (s) {
-    s.addEventListener('click', function (ev) { var b = ev.target.closest('button'); if (!b) return; F[s.dataset.acmseg] = b.dataset.v; F.zona = ''; guardarAcm(); pintar(); });
+    s.addEventListener('click', function (ev) { var b = ev.target.closest('button'); if (!b) return; F[s.dataset.acmseg] = b.dataset.v; F.zona = ''; F.pag = 1; guardarAcm(); pintar(); });
   });
-  $$('[data-acm-zona]').forEach(function (b) { b.addEventListener('click', function () { F.zona = b.dataset.acmZona; guardarAcm(); pintar(); }); });
+  $$('[data-acm-zona]').forEach(function (b) { b.addEventListener('click', function () { F.zona = b.dataset.acmZona; F.pag = 1; guardarAcm(); pintar(); }); });
+  $$('[data-acm-pag]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      F.pag = Number(b.dataset.acmPag) || 1; guardarAcm(); pintar();
+      var t = $('.acm-tabla'); if (t) t.scrollIntoView({ block: 'start' }); window.scrollBy(0, -130);
+    });
+  });
   $$('[data-acm-sel]').forEach(function (tr) {
     tr.addEventListener('click', function () { var k = tr.dataset.acmSel; if (F.sel[k]) delete F.sel[k]; else F.sel[k] = 1; guardarAcm(); pintar(); });
   });
@@ -2472,7 +2627,11 @@ function enlazarAcm() {
     b.addEventListener('click', function () { var k = b.dataset.acmQuitar; if (/^m:/.test(k)) F.manual.splice(Number(k.slice(2)), 1); else delete F.sel[k]; guardarAcm(); pintar(); });
   });
   var to = $('[data-acm-todos]');
-  if (to) to.addEventListener('click', function () { acmCandidatos(true).slice(0, 200).forEach(function (x) { F.sel[acmClave(x)] = 1; }); guardarAcm(); pintar(); });
+  if (to) to.addEventListener('click', function () {
+    var clase = F.lista === 'p' ? 'p' : 'v', lista = acmCandidatos(clase, true), pag = Math.min(Math.max(1, F.pag || 1), Math.ceil(lista.length / ACM_POR_PAGINA));
+    lista.slice((pag - 1) * ACM_POR_PAGINA, pag * ACM_POR_PAGINA).forEach(function (x) { F.sel[acmClave(x, clase)] = 1; });
+    guardarAcm(); pintar();
+  });
   var ni = $('[data-acm-ninguno]');
   if (ni) ni.addEventListener('click', function () { F.sel = {}; F.manual = []; guardarAcm(); pintar(); });
   var nu = $('[data-acm-nuevo]');
@@ -2485,24 +2644,37 @@ function enlazarAcm() {
     if (!acmElegidos().length) { toast('Marca primero los comparables'); return; }
     window.print();
   });
+  var gu = $('[data-acm-guardar]'); if (gu) gu.addEventListener('click', function () { acmGuardar(gu); });
+  var gs = $('[data-acm-guardados]'); if (gs) gs.addEventListener('click', abrirAcmGuardados);
+  var co = $('[data-acm-compartir]'); if (co) co.addEventListener('click', abrirAcmCompartir);
   var re = $('[data-acm-recargar]');
   if (re) re.addEventListener('click', function () { E.acm = null; pintar(); });
   var ma = $('[data-acm-manual]');
   if (ma) ma.addEventListener('click', abrirAcmManual);
 }
 function abrirAcmManual() {
+  var queM2 = E.acmF.base === 'construccion' ? 'de construcción' : 'de terreno';
   $('#tituloSaldo').textContent = 'Comparable a mano';
-  $('#cuerpoSaldo').innerHTML = '<p class="muted" style="margin:0 0 10px;font-size:13px">Para ventas que todavía no salen en el sistema o que cerró otra oficina.</p><div class="form">' +
+  $('#cuerpoSaldo').innerHTML = '<p class="muted" style="margin:0 0 10px;font-size:13px">Para ventas que todavía no salen en el sistema, o publicados de otras oficinas.</p><div class="form">' +
+    '<div class="full"><label>Es</label><select id="amK"><option value="v">Vendido (precio de cierre)</option><option value="p">Publicado (precio pedido)</option></select></div>' +
     '<div class="full"><label>Descripción</label><input id="amD" placeholder="Ej.: Terreno de Ninosca, a 8 cuadras de la Ollarvides"></div>' +
-    '<div><label>m² ' + (E.acmF.base === 'construccion' ? 'de construcción' : 'de terreno') + '</label><input id="amM" inputmode="decimal"></div>' +
-    '<div><label>Precio de cierre ($)</label><input id="amP" inputmode="decimal"></div>' +
-    '<div><label>Precio de captación ($, opcional)</label><input id="amC" inputmode="decimal"></div>' +
-    '<div><label>Fecha</label><input id="amF" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div></div>' +
+    '<div><label>Zona</label><input id="amZ" placeholder="Ej.: Puerta Maraven"></div>' +
+    '<div><label>m² ' + queM2 + '</label><input id="amM" inputmode="decimal"></div>' +
+    '<div><label id="amPl">Precio de cierre ($)</label><input id="amP" inputmode="decimal"></div>' +
+    '<div id="amCw"><label>Precio de captación ($, opcional)</label><input id="amC" inputmode="decimal"></div>' +
+    '<div id="amFw"><label>Fecha</label><input id="amF" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div></div>' +
     '<div class="acciones"><button class="btn" data-cerrar>Cancelar</button><button class="btn pri" id="amOk">Agregar</button></div>';
   $('#modalSaldo').classList.add('on');
+  $('#amK').addEventListener('change', function () {
+    var p = this.value === 'p';
+    $('#amPl').textContent = p ? 'Precio pedido ($)' : 'Precio de cierre ($)';
+    $('#amCw').style.display = p ? 'none' : ''; $('#amFw').style.display = p ? 'none' : '';
+  });
   $('#amOk').addEventListener('click', function () {
-    var m = { desc: $('#amD').value.trim(), m2: Number(numero($('#amM').value)) || 0, precio: Number(numero($('#amP').value)) || 0, capt: Number(numero($('#amC').value)) || 0, fecha: $('#amF').value };
-    if (!m.precio) { toast('Escribe el precio de cierre'); return; }
+    var p = $('#amK').value === 'p';
+    var m = { clase: p ? 'p' : 'v', desc: $('#amD').value.trim(), sector: $('#amZ').value.trim() || 'A mano', m2: Number(numero($('#amM').value)) || 0, precio: Number(numero($('#amP').value)) || 0,
+      capt: p ? 0 : Number(numero($('#amC').value)) || 0, fecha: p ? '' : $('#amF').value };
+    if (!m.precio) { toast('Escribe el precio'); return; }
     if (!m.m2) { toast('Escribe los m²'); return; }
     E.acmF.manual.push(m); guardarAcm();
     $('#modalSaldo').classList.remove('on'); pintar();
@@ -2696,7 +2868,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T18:53:00.298Z';
+  var VERSION = '2026-11-10T19:06:09.973Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
