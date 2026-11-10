@@ -645,7 +645,7 @@ var CHAT = (function () {
   function opcionesPara(sol, inv, max) {
     var tipos = sol.inmueble && sol.inmueble !== 'Sin especificar' ? sol.inmueble.split(', ') : [];
     var zonas = sol.zona && sol.zona !== 'Sin especificar' ? sol.zona.split(', ') : [];
-    var op = sol.operacion, p = precioDe(sol.mensaje), hab = habitacionesDe(sol.mensaje);
+    var op = sol.operacion, p = sol.presupuesto !== undefined ? sol.presupuesto : precioDe(sol.mensaje), hab = habitacionesDe(sol.mensaje);
     var RAROS = ['Galpón', 'Edificio', 'Posada/Hotel', 'Finca', 'Oficina', 'Habitación'];
     var criterios = (tipos.length ? 1 : 0) + (zonas.length ? 1 : 0) + (p ? 1 : 0);
     if (!(criterios >= 2 || (tipos.length && tipos.every(function (q) { return RAROS.indexOf(q) >= 0; })))) return [];
@@ -700,7 +700,8 @@ var CHAT = (function () {
   }
 
   return { leer: leer, clasificar: clasificar, registros: registros, inventario: inventario, opcionesPara: opcionesPara,
-    zonasDe: zonasDe, tiposDe: tiposDe, operacionDe: operacionDe, precioDe: precioDe, norm: norm };
+    zonasDe: zonasDe, tiposDe: tiposDe, operacionDe: operacionDe, precioDe: precioDe, norm: norm,
+    listaZonas: ZONAS.map(function (z) { return z[0]; }), listaTipos: TIPOS.map(function (t) { return t[0]; }) };
 })();
 
 </script>
@@ -1712,6 +1713,7 @@ function calcularMatches() {
   var sols = (C.registros || []).filter(function (r) { return r.tipo === 'Solicitud'; }).sort(function (a, b) { return (b.fecha + b.hora) > (a.fecha + a.hora) ? 1 : -1; });
   var porInm = {};
   sols.forEach(function (s) {
+    if (s.corregido) s.presupuesto = presupuestoTexto(s.precio); else delete s.presupuesto;
     s.opciones = CHAT.opcionesPara(s, inv, 8);
     // Para "a quién avisar": solo si el inmueble está entre las mejores opciones del pedido y coincide en zona o precio
     s.opciones.forEach(function (o) {
@@ -1741,6 +1743,12 @@ function calcularMatches() {
   });
   E.chatOpc = { sols: sols, nuevas: nuevas, ayudados: ayudados };
   return E.chatOpc;
+}
+/* "40000-60000" → {min, max}; "60000" → hasta; "40000-" → desde */
+function presupuestoTexto(t) {
+  var a = String(t || '').replace(/[^\d\-]/g, '').split('-');
+  if (!a[0] && !a[1]) return null;
+  return a.length === 1 ? { min: 0, max: Number(a[0]) } : { min: Number(a[0]) || 0, max: Number(a[1]) || 0 };
 }
 function telDe(oficial) {
   var t = String(((E.chat || {}).telefonos || {})[oficial] || '').replace(/\D/g, '');
@@ -1787,10 +1795,37 @@ function vChat() {
     h += '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') +
       resumenOpciones(s.opciones, abierto) +
       (s.seg ? '<span class="chip verde">✓ mandado ' + esc(String(s.seg.enviado).slice(8, 10) + '/' + String(s.seg.enviado).slice(5, 7)) + '</span>' : '') +
-      (s.cierre ? '<span class="chip verde">🎉 cerró ' + esc(s.cierre.codigo) + '</span>' : '') + '</div></div>';
+      (s.cierre ? '<span class="chip verde">🎉 cerró ' + esc(s.cierre.codigo) + '</span>' : '') +
+      (s.corregido ? '<span class="chip" title="' + esc(s.corregido) + '">✏️ corregido</span>' : '') + '</div></div>';
     h += '</div>';
   });
-  return h + '</div>';
+  return h + '</div>' + linkNoPedidos(lim);
+}
+function noPedidos(lim) { return ((E.chat || {}).registros || []).filter(function (r) { return r.tipo === 'No es pedido' && r.fecha >= lim; }); }
+function linkNoPedidos(lim) {
+  var n = noPedidos(lim).length;
+  return n ? '<p style="margin:10px 0 0;font-size:13px"><a href="#" data-no-pedidos="' + lim + '">🚫 ' + n + ' marcado' + (n > 1 ? 's' : '') + ' como «no es pedido» · ver</a></p>' : '';
+}
+function abrirNoPedidos(lim) {
+  var lista = noPedidos(lim);
+  $('#tituloSaldo').textContent = 'Marcados como «no es pedido»';
+  var h = '<p class="muted" style="font-size:13px;margin:0 0 10px">No cuentan en los pedidos ni en las estadísticas. Si alguno sí era un pedido, restáuralo.</p>';
+  lista.forEach(function (r, i) {
+    h += '<div style="border:1px solid var(--linea);border-radius:12px;padding:10px 12px;margin-bottom:8px"><div style="display:flex;justify-content:space-between;gap:10px"><b>' + esc(nombreChat(r.asesor)) + '</b><span class="muted" style="font-size:12px">' + esc(r.fecha.split('-').reverse().join('/')) + ' ' + esc(r.hora) + '</span></div>' +
+      '<div style="font-size:13px;margin:4px 0">' + esc(r.mensaje.slice(0, 200)) + (r.mensaje.length > 200 ? '…' : '') + '</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="muted" style="font-size:12px">' + esc(r.corregido || '') + '</span><button class="btn" data-restaurar="' + i + '">Restaurar</button></div></div>';
+  });
+  h += '<div class="acciones"><button class="btn" data-cerrar>Cerrar</button></div>';
+  $('#cuerpoSaldo').innerHTML = h; $('#modalSaldo').classList.add('on');
+  $$('[data-restaurar]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var r = lista[Number(b.dataset.restaurar)]; b.disabled = true;
+      api('app_corregirPedido', { clave: r.fecha + '|' + r.hora + '|' + r.asesor, restaurar: true }).then(function (r2) {
+        r.tipo = 'Solicitud'; r.corregido = r2 && r2.corregido || 'Restaurado'; E.chatOpc = null; pintar(); toast('Restaurado');
+        if (noPedidos(lim).length) abrirNoPedidos(lim); else $('#modalSaldo').classList.remove('on');
+      }).catch(function (e) { b.disabled = false; toast(e.message, 5000); });
+    });
+  });
 }
 function vResultadosChat(ayud, enviados) {
   var h = '<p class="muted" style="margin:0 0 10px;font-size:13px">Pedidos a los que les mandaste opciones y que después cerraron (en el listado del sistema) uno de los inmuebles que les pasaste.</p>';
@@ -1842,7 +1877,10 @@ function abrirPedido(idx) {
   $('#tituloSaldo').textContent = 'Pedido de ' + quien;
   var h = '<div class="muted" style="font-size:12px">' + esc(s.fecha.split('-').reverse().join('/')) + ' ' + esc(s.hora) + (s.agente ? '' : ((E.chat.staff || {})[s.asesor] ? ' · staff (' + esc(E.chat.staff[s.asesor]) + ')' : ' · <span title="No está en AGENTES">externo</span>')) + '</div>';
   h += '<div style="margin:6px 0 8px">' + esc(s.mensaje) + '</div>';
-  h += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') + '</div>';
+  h += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;align-items:center">' + chips.map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('') +
+    '<span style="flex:1"></span><button class="btn" id="corrPed" style="padding:4px 10px;font-size:13px">✏️ Corregir</button><button class="btn" id="noPed" style="padding:4px 10px;font-size:13px">🚫 No es pedido</button></div>';
+  if (s.corregido) h += '<div class="muted" style="font-size:12px;margin:-4px 0 8px">✏️ ' + esc(s.corregido) + '</div>';
+  h += formCorregir(s);
   if (s.seg) h += '<div class="card" style="padding:8px 12px;margin-bottom:10px;background:#eefaf3;border-color:#bfe8cf">✓ Le mandaste opciones el ' + esc(s.seg.enviado) + ' (' + esc(s.seg.por) + (s.seg.como ? ', ' + esc(s.seg.como) : '') + ')' + (s.seg.codigos.length ? ': ' + esc(s.seg.codigos.join(', ')) : '') + (s.cierre ? '<br><b>🎉 Cerró ' + esc(s.cierre.codigo) + ' el ' + esc(s.cierre.fecha.split('-').reverse().join('/')) + '</b>' : '') + '</div>';
   if (!E.chat.inventario.length) h += '<div class="aviso">Falta cargar el inventario de Novus para buscar opciones.</div>';
   else if (!s.opciones.length) h += '<div class="aviso">No encontré opciones. ' + (chips.length < 2 ? 'El pedido dice muy poco (hace falta al menos tipo y zona, o tipo y presupuesto).' : 'No hay nada activo de ese tipo y operación.') + '</div>';
@@ -1870,6 +1908,7 @@ function abrirPedido(idx) {
   $('#cuerpoSaldo').innerHTML = h;
   $('#modalSaldo').classList.add('on');
 
+  enlazarCorregir(s, idx);
   function elegidas() { return $$('.opc-envio').filter(function (c) { return c.checked; }).map(function (c) { return s.opciones[Number(c.dataset.k)]; }); }
   function texto(ops) {
     var nombre = quien.split(' ')[0];
@@ -1905,6 +1944,56 @@ function abrirPedido(idx) {
       var ops = elegidas(); if (!ops.length) { mc.disabled = false; toast('Marca al menos una opción'); return; }
       marcar(ops, 'Manual').then(function () { $('#modalSaldo').classList.remove('on'); toast('✓ Marcado como mandado'); }).catch(function (e) { mc.disabled = false; toast(e.message, 5000); });
     }
+  });
+}
+/* Corregir lo que el lector del chat entendió mal: operación, tipo, zona y presupuesto */
+function formCorregir(s) {
+  var tipos = s.inmueble && s.inmueble !== 'Sin especificar' ? s.inmueble.split(', ') : [];
+  var zonas = s.zona && s.zona !== 'Sin especificar' ? s.zona.split(', ') : [];
+  var p = s.presupuesto !== undefined ? s.presupuesto : CHAT.precioDe(s.mensaje);
+  function cajas(lista, marcadas, cls) {
+    return lista.map(function (v) { return '<label style="display:inline-flex;gap:5px;align-items:center;font-weight:400;font-size:13px;border:1px solid var(--linea);border-radius:999px;padding:4px 10px;margin:0 6px 6px 0;cursor:pointer"><input type="checkbox" class="' + cls + '" value="' + esc(v) + '"' + (marcadas.indexOf(v) >= 0 ? ' checked' : '') + '>' + esc(v) + '</label>'; }).join('');
+  }
+  var zonasOrden = CHAT.listaZonas.slice().sort(function (a, b) { return (zonas.indexOf(b) >= 0) - (zonas.indexOf(a) >= 0) || a.localeCompare(b); });
+  var h = '<div id="formCorr" class="card" style="display:none;padding:12px;margin-bottom:12px;background:#f7f9fc">';
+  h += '<div style="font-weight:600;margin-bottom:8px">Corregir el pedido</div>';
+  h += '<label style="font-size:13px">1. Operación</label><div style="margin:4px 0 10px">' + ['Venta', 'Alquiler', 'Venta y alquiler', 'Sin especificar'].map(function (o) {
+    return '<label style="display:inline-flex;gap:5px;align-items:center;font-weight:400;font-size:13px;margin:0 12px 6px 0"><input type="radio" name="corrOp" value="' + o + '"' + ((s.operacion || 'Sin especificar') === o ? ' checked' : '') + '>' + o + '</label>';
+  }).join('') + '</div>';
+  h += '<label style="font-size:13px">2. Tipo de inmueble</label><div style="margin:4px 0 8px">' + cajas(CHAT.listaTipos, tipos, 'corrTipo') + '</div>';
+  h += '<label style="font-size:13px">3. Zona</label><div style="margin:4px 0 8px;max-height:150px;overflow:auto">' + cajas(zonasOrden, zonas, 'corrZona') + '</div>';
+  h += '<label style="font-size:13px">4. Presupuesto en $ (deja vacío lo que no dijo)</label><div style="display:flex;gap:8px;margin:4px 0 12px"><input id="corrMin" inputmode="numeric" placeholder="Desde" value="' + (p && p.min ? p.min : '') + '" style="flex:1;min-width:0;width:50%"><input id="corrMax" inputmode="numeric" placeholder="Hasta" value="' + (p && p.max ? p.max : '') + '" style="flex:1;min-width:0;width:50%"></div>';
+  h += '<div style="display:flex;gap:8px"><button class="btn pri" id="corrGuardar">Guardar y buscar de nuevo</button><button class="btn" id="corrCancelar">Cancelar</button></div></div>';
+  return h;
+}
+function enlazarCorregir(s, idx) {
+  var f = $('#formCorr');
+  $('#corrPed').addEventListener('click', function () { f.style.display = f.style.display === 'none' ? 'block' : 'none'; if (f.style.display === 'block') f.scrollIntoView({ block: 'nearest' }); });
+  $('#corrCancelar').addEventListener('click', function () { f.style.display = 'none'; });
+  $('#noPed').addEventListener('click', function () {
+    var b = this; b.disabled = true;
+    api('app_corregirPedido', { clave: s.fecha + '|' + s.hora + '|' + s.asesor, noEsPedido: true }).then(function (r) {
+      s.tipo = 'No es pedido'; s.corregido = r && r.corregido || 'No es pedido'; E.chatOpc = null;
+      $('#modalSaldo').classList.remove('on'); pintar(); toast('Listo: ya no cuenta como pedido');
+    }).catch(function (e) { b.disabled = false; toast(e.message, 5000); });
+  });
+  $('#corrGuardar').addEventListener('click', function () {
+    var b = this;
+    var op = ($$('[name="corrOp"]').filter(function (x) { return x.checked; })[0] || {}).value || 'Sin especificar';
+    var tipos = $$('.corrTipo').filter(function (x) { return x.checked; }).map(function (x) { return x.value; });
+    var zonas = $$('.corrZona').filter(function (x) { return x.checked; }).map(function (x) { return x.value; });
+    function monto(v) { v = String(v || '').toLowerCase().replace(/,\d{1,2}$/, ''); var n = Number(v.replace(/[^\d]/g, '')) || 0; return /mil|k/.test(v) && n < 10000 ? n * 1000 : n; }
+    var mn = monto($('#corrMin').value), mx = monto($('#corrMax').value);
+    if (mn && mx && mn > mx) { var t = mn; mn = mx; mx = t; }
+    var precio = mn ? mn + '-' + (mx || '') : (mx ? String(mx) : '');
+    var d = { clave: s.fecha + '|' + s.hora + '|' + s.asesor, operacion: op, inmueble: tipos.join(', ') || 'Sin especificar', zona: zonas.join(', ') || 'Sin especificar', precio: precio };
+    b.disabled = true;
+    api('app_corregirPedido', d).then(function (r) {
+      s.operacion = d.operacion; s.inmueble = d.inmueble; s.zona = d.zona; s.precio = d.precio; s.corregido = r && r.corregido || 'Corregido';
+      E.chatOpc = null; pintar();
+      var nuevo = calcularMatches().sols.indexOf(s);
+      abrirPedido(nuevo >= 0 ? nuevo : idx); toast('Corregido · ' + s.opciones.length + ' opciones');
+    }).catch(function (e) { b.disabled = false; toast(e.message, 5000); });
   });
 }
 function tablaOpciones(ops) {
@@ -1959,6 +2048,7 @@ function enlazarChat() {
   $$('[data-cargar-chat]').forEach(function (b) { b.addEventListener('click', function () { CARGA_CHAT = null; $('#archChat').value = ''; $('#resChat').innerHTML = ''; $('#btnChatSubir').disabled = true; $('#modalChat').classList.add('on'); }); });
   var solo = $('#chatSolo'); if (solo) solo.addEventListener('change', function () { E.chatSolo = solo.checked; pintar(); });
   $$('[data-pedido]').forEach(function (el) { el.addEventListener('click', function () { abrirPedido(Number(el.dataset.pedido)); }); });
+  $$('[data-no-pedidos]').forEach(function (el) { el.addEventListener('click', function (ev) { ev.preventDefault(); abrirNoPedidos(el.dataset.noPedidos); }); });
 }
 $('#archChat').addEventListener('change', function () {
   var fs = Array.prototype.slice.call(this.files || []);
@@ -2168,7 +2258,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T02:27:56.545Z';
+  var VERSION = '2026-11-10T02:37:10.870Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
