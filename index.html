@@ -1100,7 +1100,7 @@ function vDistribucion(a) {
   h += '<button class="btn" data-imprimir-dist="agente">Imprimir para agentes</button><button class="btn pri" data-imprimir-dist="staff">Imprimir para staff</button></div>';
   var modo = E.distModo || 'staff';
   h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) +
-    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'La misma hoja, sin el reparto del staff (broker, coordinación, 1%) ni lo que queda a la oficina.' : 'Con toda la distribución: broker, coordinación y lo que queda a la oficina.') + '</span></div>';
+    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'La misma hoja, sin el reparto del staff (broker, coordinación y 1%).' : 'Con toda la distribución: broker, coordinación y lo que queda a la oficina.') + '</span></div>';
   var ver = E.distSel === 'todas' ? negs : negs.filter(function (n) { return n.clave === E.distSel; });
   h += ver.map(function (n) { return hojaDistribucion(n, a, modo === 'agente'); }).join('');
   return h;
@@ -1155,7 +1155,6 @@ function hojaDistribucion(n, a, paraAgente) {
     h += '</tbody></table>';
   });
 
-  if (!paraAgente) {
   h += '<table class="dist-t" style="margin-top:12px"><tbody>';
   h += fila('<b>TOTAL CANCELADO</b>', porDist(cancelado), cancelado, 'sub');
   h += fila('TOTAL INGRESO BRUTO AGENCIA', '', bruto);
@@ -1163,7 +1162,6 @@ function hojaDistribucion(n, a, paraAgente) {
   h += fila('<b>TOTAL INGRESO NETO AGENCIA</b>', porDist(netoAg), netoAg, 'tot');
   if (spiff) h += fila('SPIFF entregado (aporte del propietario)', '', spiff);
   h += '</tbody></table>';
-  }
   h += '<div class="dist-firma"><div>Recibido por</div><div>Administración</div></div>';
   h += '</div>';
   return h;
@@ -2086,7 +2084,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T02:06:16.506Z';
+  var VERSION = '2026-11-10T02:09:16.518Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
