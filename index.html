@@ -2269,6 +2269,11 @@ function vRespaldo() {
   h += '<p style="margin:0 0 12px">Último respaldo: <b>' + (R.ultimo ? esc(R.ultimo) : 'todavía ninguno') + '</b></p>';
   h += '<div class="acciones" style="justify-content:flex-start;flex-wrap:wrap">' + (R.carpeta ? '<a class="btn" href="' + esc(R.carpeta) + '" target="_blank" rel="noopener">Abrir carpeta en Drive</a>' : '') + '<button class="btn pri" id="respAhora">Hacer respaldo ahora</button></div>';
   if (!R.activo) h += '<p class="muted" style="font-size:12px;margin-top:10px">Para activarlo, Roman debe ejecutar una vez <b>instalarRespaldo</b> en el editor de Apps Script.</p>';
+  h += '</div><div style="height:12px"></div><div class="card" style="max-width:520px"><div class="card-t"><b>Copia diaria fuera de Google</b></div>';
+  h += '<p style="margin:0 0 8px">Cada madrugada se guarda una copia de todo (incluido el chat) en GitHub, con el historial de cada día. Si se pierde la cuenta de Google o se borra una hoja, los datos siguen ahí.</p>';
+  h += '<p style="margin:0 0 4px">Estado: ' + (R.externo ? '<span class="chip verde">Activa</span>' : R.externoClave ? '<span class="chip ambar">Clave creada, falta la primera copia</span>' : '<span class="chip ambar">Sin activar</span>') + '</p>';
+  h += '<p style="margin:0 0 12px">Última copia: <b>' + (R.externo ? esc(R.externo.replace('T', ' ')) : 'todavía ninguna') + '</b></p>';
+  h += '<div id="claveResp"></div><div class="acciones" style="justify-content:flex-start"><button class="btn" id="respClave">' + (R.externoClave ? 'Crear otra clave' : 'Crear clave') + '</button></div>';
   return h + '</div>';
 }
 function vPin() {
@@ -2300,6 +2305,16 @@ function enlazarConfig() {
     api('app_respaldoAhora').then(function (r) { E.respaldo = r; cargando(false); toast('Respaldo guardado'); pintar(); })
       .catch(function (e) { cargando(false); rA.disabled = false; toast('No se pudo: ' + e.message, 6000); });
   });
+  var rC = $('#respClave');
+  if (rC) rC.addEventListener('click', function () {
+    rC.disabled = true;
+    api('app_claveRespaldo').then(function (r) {
+      $('#claveResp').innerHTML = '<p style="margin:0 0 6px;font-size:13px"><b>Copia esta clave ahora</b> (no se vuelve a mostrar) y pégala en GitHub como secreto <b>RESPALDO_CLAVE</b>:</p>' +
+        '<div style="display:flex;gap:8px;margin-bottom:10px"><input id="claveTxt" readonly value="' + esc(r.clave) + '" style="flex:1;min-width:0;font-size:12px"><button class="btn pri" id="claveCopiar">Copiar</button></div>';
+      $('#claveCopiar').addEventListener('click', function () { var t = $('#claveTxt'); t.select(); (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.reject()).then(function () { toast('Clave copiada'); }).catch(function () { toast('Selecciónala y cópiala a mano'); }); });
+      if (E.respaldo) E.respaldo.externoClave = true;
+    }).catch(function (e) { rC.disabled = false; toast('No se pudo: ' + e.message, 6000); });
+  });
   var pinOk = $('#pinOk');
   if (pinOk) pinOk.addEventListener('click', function () {
     var a = $('#pin0').value, n1 = $('#pin1').value, n2 = $('#pin2').value;
@@ -2319,7 +2334,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T02:40:12.940Z';
+  var VERSION = '2026-11-10T02:43:42.385Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
