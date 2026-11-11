@@ -806,7 +806,7 @@ function api(fn) {
 }
 
 /* ───────── Estado ───────── */
-var E = { distModo: 'staff', chatEstado: 'pendientes', chat: null, chatVista: 'pedidos', chatDias: '30', chatSolo: false, cfg: null, cfgVista: 'agentes', cfgAg: 'todas', ini: null, datos: null, cuadre: {}, vistaAnal: null, hojas: {}, tab: 'inicio', filtroNeg: 'todas', agNeg: 'todas', buscar: '', agCuadro: 'Avanti', agAnal: 'todas', abiertos: {} };
+var E = { distModo: 'staff', chatEstado: 'pendientes', chat: null, chatVista: 'pedidos', chatDias: '30', chatSolo: false, cfg: null, cfgVista: 'agentes', cfgAg: 'todas', ini: null, datos: null, cuadre: {}, vistaAnal: null, hojas: {}, tab: 'inicio', filtroNeg: 'todas', agNeg: 'todas', buscar: '', agCuadro: 'Avanti', agAnal: 'todas', metaAnal: 'cb', estAnal: 'todos', analAbiertos: {}, abiertos: {} };
 
 /* ───────── Utilidades ───────── */
 var fmt = new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1440,23 +1440,41 @@ function vAnalisis() {
   var mesRef = E.ini.meses[A.mesesTranscurridos - 1];
   var h = '<div class="barra-acc"><h2 style="margin:0">Análisis evaluativo</h2><button class="btn pri" data-reporte>Reporte semanal</button></div>';
   h += '<p class="sub">Acumulado de enero a ' + mesRef.toLowerCase() + '. Para ir al día deberían llevar <b>' + pct(A.ritmo) + '</b> de su meta anual (la rayita en cada barra). Toca un agente para ver su hoja.</p>';
-  h += '<div class="barra-filtros">' + seg('agAnal', [['todas', 'Ambas'], ['Avanti', 'Avanti'], ['Avanti II', 'Avanti II']]) + '</div>';
-  var lista = A.agentes.filter(function (a) { return E.agAnal === 'todas' || a.agencia === E.agAnal; })
-    .sort(function (x, y) { return (x.broker - y.broker) || (y.pct - x.pct); });
-  var alDia = lista.filter(function (a) { return !a.broker && a.meta.cb && a.pct >= A.ritmo; }).length;
-  var conMeta = lista.filter(function (a) { return !a.broker && a.meta.cb; }).length;
-  h += '<div class="aviso info"><b>' + alDia + ' de ' + conMeta + '</b> agentes van al día con su meta de comisión.</div>';
-  var conMes = !esAnio();
-  h += '<div class="card pad0"><div class="tabla-wrap"><table><thead><tr><th>Agente</th><th class="d ocultar-movil">Nivel</th>' + (conMes ? '<th class="d">CB ' + D.mes.slice(0, 3).toLowerCase() + '.</th>' : '') + '<th class="d">CB acumulada</th><th style="min-width:120px">Meta</th><th class="d ocultar-movil">Trans.</th><th class="d ocultar-movil">Capt.</th></tr></thead><tbody>';
+  var METAS = { cb: ['Comisión', 'comisión'], trans: ['Transacciones', 'transacciones'], capt: ['Captaciones', 'captaciones'] }, mk = E.metaAnal;
+  function avance(a, k) { return a.meta[k] ? a.acum[k] / a.meta[k] : 0; }
+  function claseDe(p) { return p >= 1 ? 'verde' : p >= A.ritmo ? '' : p >= A.ritmo * .6 ? 'ambar' : 'rojo'; }
+  function valor(a, k) { return k === 'cb' ? d0(a.acum.cb) : String(a.acum[k]); }
+  function metaTxt(a, k) { return k === 'cb' ? d0(a.meta.cb) : String(a.meta[k]); }
+  h += '<div class="barra-filtros">' + seg('agAnal', [['todas', 'Ambas'], ['Avanti', 'Avanti'], ['Avanti II', 'Avanti II']]) +
+    seg('metaAnal', [['cb', 'Comisión'], ['trans', 'Transacciones'], ['capt', 'Captaciones']]) +
+    seg('estAnal', [['todos', 'Todos'], ['aldia', 'Al día'], ['atras', 'Atrasados'], ['sin', 'Sin meta']]) + '</div>';
+  var base = A.agentes.filter(function (a) { return E.agAnal === 'todas' || a.agencia === E.agAnal; });
+  var alDia = base.filter(function (a) { return !a.broker && a.meta[mk] && avance(a, mk) >= A.ritmo; }).length;
+  var conMeta = base.filter(function (a) { return !a.broker && a.meta[mk]; }).length;
+  var lista = base.filter(function (a) {
+    var p = avance(a, mk);
+    return E.estAnal === 'todos' || (E.estAnal === 'sin' ? !a.meta[mk] : E.estAnal === 'aldia' ? a.meta[mk] && p >= A.ritmo : a.meta[mk] && p < A.ritmo);
+  }).sort(function (x, y) { return (x.broker - y.broker) || (avance(y, mk) - avance(x, mk)) || (y.acum[mk] - x.acum[mk]); });
+  h += '<div class="aviso info"><b>' + alDia + ' de ' + conMeta + '</b> agentes van al día con su meta de ' + METAS[mk][1] + '. Toca <b>▾</b> junto al nombre para ver sus otras metas.</div>';
+  var conMes = !esAnio(), cols = 4 + (conMes ? 1 : 0);
+  h += '<div class="card pad0"><div class="tabla-wrap"><table><thead><tr><th>Agente</th><th class="d ocultar-movil">Nivel</th>' + (conMes ? '<th class="d ocultar-movil">CB ' + D.mes.slice(0, 3).toLowerCase() + '.</th>' : '') + '<th class="d">' + METAS[mk][0] + '</th><th style="min-width:120px">Meta</th></tr></thead><tbody>';
+  if (!lista.length) h += '<tr><td colspan="' + cols + '" class="muted" style="text-align:center;padding:18px">Nadie en este filtro.</td></tr>';
   lista.forEach(function (a) {
-    var clase = a.pct >= 1 ? 'verde' : a.pct >= A.ritmo ? '' : a.pct >= A.ritmo * .6 ? 'ambar' : 'rojo';
-    h += '<tr class="click" data-agente="' + esc(a.hoja) + '"><td><span class="nombre-ag">' + esc(a.nombre) + '</span>' + (a.broker ? ' <span class="chip">broker</span>' : '') + '<div class="muted" style="font-size:12px">' + esc(a.agencia) + '</div></td>' +
+    var p = avance(a, mk), ab = !!E.analAbiertos[a.hoja];
+    h += '<tr class="click" data-agente="' + esc(a.hoja) + '"><td><div style="display:flex;gap:8px;align-items:center"><button class="btn" data-mas-metas="' + esc(a.hoja) + '" title="Ver las otras metas" style="padding:2px 9px;font-size:13px;line-height:1.4">' + (ab ? '▴' : '▾') + '</button><div><span class="nombre-ag">' + esc(a.nombre) + '</span>' + (a.broker ? ' <span class="chip">broker</span>' : '') + '<div class="muted" style="font-size:12px">' + esc(a.agencia) + '</div></div></div></td>' +
       '<td class="d ocultar-movil">' + (a.nivel || '') + '</td>' +
-      (conMes ? '<td class="d num">' + (a.mes.cb ? d0(a.mes.cb) : '—') + '</td>' : '') +
-      '<td class="d num"><b>' + d0(a.acum.cb) + '</b></td>' +
-      '<td>' + (a.meta.cb ? barra(a.pct, clase, A.ritmo) + '<div class="muted" style="font-size:12px;margin-top:3px">' + pct(a.pct) + ' de ' + d0(a.meta.cb) + '</div>' : '<span class="muted">sin meta</span>') + '</td>' +
-      '<td class="d ocultar-movil">' + a.acum.trans + (a.meta.trans ? '<span class="muted">/' + a.meta.trans + '</span>' : '') + '</td>' +
-      '<td class="d ocultar-movil">' + a.acum.capt + (a.meta.capt ? '<span class="muted">/' + a.meta.capt + '</span>' : '') + '</td></tr>';
+      (conMes ? '<td class="d num ocultar-movil">' + (a.mes.cb ? d0(a.mes.cb) : '—') + '</td>' : '') +
+      '<td class="d num"><b>' + valor(a, mk) + '</b></td>' +
+      '<td>' + (a.meta[mk] ? barra(p, claseDe(p), A.ritmo) + '<div class="muted" style="font-size:12px;margin-top:3px">' + pct(p) + ' de ' + metaTxt(a, mk) + '</div>' : '<span class="muted">sin meta</span>') + '</td></tr>';
+    if (ab) {
+      h += '<tr><td colspan="' + cols + '" style="background:#f7f9fc;padding:10px 14px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px">';
+      ['cb', 'trans', 'capt'].forEach(function (k) {
+        var q = avance(a, k);
+        h += '<div><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><b>' + METAS[k][0] + '</b><span>' + valor(a, k) + (a.meta[k] ? ' <span class="muted">de ' + metaTxt(a, k) + '</span>' : '') + '</span></div>' +
+          (a.meta[k] ? barra(q, claseDe(q), A.ritmo) + '<div class="muted" style="font-size:12px;margin-top:2px">' + pct(q) + (q >= A.ritmo ? ' · al día' : ' · le falta ' + (k === 'cb' ? d0(Math.max(0, a.meta.cb * A.ritmo - a.acum.cb)) : Math.max(1, Math.ceil(a.meta[k] * A.ritmo - a.acum[k]))) + ' para ir al día') + '</div>' : '<div class="muted" style="font-size:12px">sin meta</div>') + '</div>';
+      });
+      h += '</div></td></tr>';
+    }
   });
   h += '</tbody></table></div></div>';
   h += '<p class="muted" style="font-size:12px">Las metas de cada agente se cambian en la hoja del Análisis (PARAMETROS). <a href="' + E.ini.enlaces.analisis + '" target="_blank">Abrir Análisis</a></p>';
@@ -1582,6 +1600,7 @@ function enlazar() {
   if (E.tab === 'acm') enlazarAcm();
   $$('[data-entrega]').forEach(function (b) { b.addEventListener('click', function () { abrirEntrega(b.dataset.entrega); }); });
   $$('[data-saldo]').forEach(function (b) { b.addEventListener('click', function () { abrirSaldo(E.pendientes[Number(b.dataset.saldo)]); }); });
+  $$('[data-mas-metas]').forEach(function (b) { b.addEventListener('click', function (ev) { ev.stopPropagation(); var k = b.dataset.masMetas; E.analAbiertos[k] = !E.analAbiertos[k]; pintar(); }); });
   $$('[data-agente]').forEach(function (el) { el.addEventListener('click', function () { E.vistaAnal = { tipo: 'agente', hoja: el.dataset.agente }; pintar(); window.scrollTo(0, 0); }); });
   $$('[data-reporte]').forEach(function (el) { el.addEventListener('click', function () { E.vistaAnal = { tipo: 'reporte' }; pintar(); window.scrollTo(0, 0); }); });
   $$('[data-volver]').forEach(function (el) { el.addEventListener('click', function () { E.vistaAnal = null; pintar(); }); });
@@ -2883,7 +2902,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-11T03:52:22.472Z';
+  var VERSION = '2026-11-11T16:58:47.740Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
