@@ -2808,6 +2808,11 @@ function vRespaldo() {
   h += '<p style="margin:0 0 4px">Estado: ' + (R.externo ? '<span class="chip verde">Activa</span>' : R.externoClave ? '<span class="chip ambar">Clave creada, falta la primera copia</span>' : '<span class="chip ambar">Sin activar</span>') + '</p>';
   h += '<p style="margin:0 0 12px">Última copia: <b>' + (R.externo ? esc(R.externo.replace('T', ' ')) : 'todavía ninguna') + '</b></p>';
   h += '<div id="claveResp"></div><div class="acciones" style="justify-content:flex-start"><button class="btn" id="respClave">' + (R.externoClave ? 'Crear otra clave' : 'Crear clave') + '</button></div>';
+  h += '</div><div style="height:12px"></div><div class="card" style="max-width:520px"><div class="card-t"><b>Reporte semanal por correo</b></div>';
+  h += '<p style="margin:0 0 8px">Cada lunes a las 7 am: meta, proyección, cobrado y por cobrar del mes, lo más grande por cobrar y el movimiento del chat.</p>';
+  h += '<p style="margin:0 0 4px">Estado: ' + (R.reporteActivo ? '<span class="chip verde">Activo</span>' : '<span class="chip ambar">Sin activar</span>') + ' · Último envío: <b>' + esc(R.reporteUltimo || 'todavía ninguno') + '</b></p>';
+  h += '<label style="font-size:13px;display:block;margin:10px 0 4px">Le llega a (correos separados por coma)</label><textarea id="repPara" rows="3" style="width:100%;box-sizing:border-box">' + esc(R.reportePara || '') + '</textarea>';
+  h += '<div class="acciones" style="justify-content:flex-start"><button class="btn" id="repGuardar">Guardar correos</button><button class="btn pri" id="repEnviar">Enviar reporte ahora</button></div>';
   return h + '</div>';
 }
 function vPin() {
@@ -2839,6 +2844,16 @@ function enlazarConfig() {
     api('app_respaldoAhora').then(function (r) { E.respaldo = r; cargando(false); toast('Respaldo guardado'); pintar(); })
       .catch(function (e) { cargando(false); rA.disabled = false; toast('No se pudo: ' + e.message, 6000); });
   });
+  var rG = $('#repGuardar'), rE = $('#repEnviar');
+  if (rG) rG.addEventListener('click', function () {
+    rG.disabled = true;
+    api('app_reporteGuardar', $('#repPara').value).then(function (r) { E.respaldo = r; pintar(); toast('Correos guardados'); }).catch(function (e) { rG.disabled = false; toast(e.message, 6000); });
+  });
+  if (rE) rE.addEventListener('click', function () {
+    rE.disabled = true; rE.textContent = 'Enviando…';
+    api('app_reporteEnviar').then(function (r) { E.respaldo = r; pintar(); toast('Reporte enviado a ' + (r.reportePara || '').split(',').length + ' correo(s)', 5000); })
+      .catch(function (e) { rE.disabled = false; rE.textContent = 'Enviar reporte ahora'; toast('No se envió: ' + e.message, 6000); });
+  });
   var rC = $('#respClave');
   if (rC) rC.addEventListener('click', function () {
     rC.disabled = true;
@@ -2868,7 +2883,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-10T19:06:09.973Z';
+  var VERSION = '2026-11-11T03:52:22.472Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
