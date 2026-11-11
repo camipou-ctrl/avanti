@@ -2896,8 +2896,18 @@ function enlazarConfig() {
   if (rI) rI.addEventListener('click', function () {
     var d = { libro: $('#restLibro').value, hoja: $('#restHoja').value, fecha: $('#restFecha').value };
     rI.disabled = true; rI.textContent = 'Pidiendo…';
-    api('app_restaurar', d).then(function () {
-      E.restAviso = 'Listo. En 1 o 2 minutos aparece la pestaña <b>RESTAURADO ' + esc(d.hoja) + '</b> (borde naranja) al final del libro ' + NOMBRE_LIBRO[d.libro] + '.'; pintar();
+    api('app_restaurar', d).then(function (r) {
+      E.restAviso = '⏳ Recuperando <b>' + esc(d.hoja) + '</b>… tarda 1 o 2 minutos. Aquí mismo te sale el enlace.'; pintar();
+      var intentos = 0;
+      (function revisar() {
+        setTimeout(function () {
+          api('app_restaurarListo', d.libro, r.antes || []).then(function (x) {
+            if (x.listo) { E.restAviso = '✅ Listo: <a href="' + esc(x.url) + '" target="_blank"><b>Abrir «' + esc(x.nombre) + '»</b></a> (libro ' + NOMBRE_LIBRO[d.libro] + ', pestaña naranja al final).'; if (E.tab === 'config') pintar(); toast('Pestaña restaurada'); }
+            else if (++intentos < 16) revisar();
+            else { E.restAviso = 'Está tardando más de lo normal. Revisa en unos minutos el final del libro ' + NOMBRE_LIBRO[d.libro] + ', o avísale a Claude.'; if (E.tab === 'config') pintar(); }
+          }).catch(function () { if (++intentos < 16) revisar(); });
+        }, 15000);
+      })();
     }).catch(function (e) { rI.disabled = false; rI.textContent = 'Restaurar'; toast('No se pudo: ' + e.message, 7000); });
   });
   var rG = $('#repGuardar'), rE = $('#repEnviar');
@@ -2939,7 +2949,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-11T16:59:02.173Z';
+  var VERSION = '2026-11-11T17:09:16.314Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
