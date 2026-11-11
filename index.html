@@ -2827,11 +2827,35 @@ function vRespaldo() {
   h += '<p style="margin:0 0 4px">Estado: ' + (R.externo ? '<span class="chip verde">Activa</span>' : R.externoClave ? '<span class="chip ambar">Clave creada, falta la primera copia</span>' : '<span class="chip ambar">Sin activar</span>') + '</p>';
   h += '<p style="margin:0 0 12px">Última copia: <b>' + (R.externo ? esc(R.externo.replace('T', ' ')) : 'todavía ninguna') + '</b></p>';
   h += '<div id="claveResp"></div><div class="acciones" style="justify-content:flex-start"><button class="btn" id="respClave">' + (R.externoClave ? 'Crear otra clave' : 'Crear clave') + '</button></div>';
+  h += '</div><div style="height:12px"></div>' + vRestaurar();
   h += '</div><div style="height:12px"></div><div class="card" style="max-width:520px"><div class="card-t"><b>Reporte semanal por correo</b></div>';
   h += '<p style="margin:0 0 8px">Cada lunes a las 7 am: meta, proyección, cobrado y por cobrar del mes, lo más grande por cobrar y el movimiento del chat.</p>';
   h += '<p style="margin:0 0 4px">Estado: ' + (R.reporteActivo ? '<span class="chip verde">Activo</span>' : '<span class="chip ambar">Sin activar</span>') + ' · Último envío: <b>' + esc(R.reporteUltimo || 'todavía ninguno') + '</b></p>';
   h += '<label style="font-size:13px;display:block;margin:10px 0 4px">Le llega a (correos separados por coma)</label><textarea id="repPara" rows="3" style="width:100%;box-sizing:border-box">' + esc(R.reportePara || '') + '</textarea>';
   h += '<div class="acciones" style="justify-content:flex-start"><button class="btn" id="repGuardar">Guardar correos</button><button class="btn pri" id="repEnviar">Enviar reporte ahora</button></div>';
+  return h + '</div>';
+}
+/* Recuperar una pestaña como estaba un día (queda en una pestaña nueva "RESTAURADO…", no pisa nada) */
+var NOMBRE_LIBRO = { base: 'Base central', chat: 'Chat', flujo: 'Flujo', analisis: 'Análisis' };
+function vRestaurar() {
+  var R = E.restInfo, h = '<div class="card" style="max-width:520px"><div class="card-t"><b>Restaurar una pestaña</b></div>';
+  h += '<p style="margin:0 0 10px">Recupera una pestaña como estaba un día. Aparece en una pestaña nueva llamada «RESTAURADO…», al lado de la original, <b>sin pisar nada</b>.</p>';
+  if (!R) {
+    if (!E.restCargando) { E.restCargando = true; setTimeout(function () { api('app_restaurarInfo').then(function (r) { E.restInfo = r; E.restCargando = false; pintar(); }).catch(function (e) { E.restInfo = { error: e.message }; E.restCargando = false; pintar(); }); }, 0); }
+    return h + '<div class="esqueleto" style="height:80px"></div></div>';
+  }
+  if (R.error) return h + '<div class="aviso">' + esc(R.error) + '</div></div>';
+  if (!R.conAcceso) {
+    h += '<div class="aviso info" style="margin-bottom:10px">Falta un paso único: pegar aquí el acceso de GitHub (Roman).</div>';
+    h += '<input id="ghTok" type="password" autocomplete="off" placeholder="github_pat_…" style="width:100%;box-sizing:border-box"><div class="acciones" style="justify-content:flex-start"><button class="btn pri" id="ghGuardar">Guardar acceso</button></div>';
+    return h + '</div>';
+  }
+  var lib = E.restLibro || 'base', hojas = R.libros[lib] || [];
+  h += '<label style="font-size:13px;display:block;margin-bottom:4px">1. Libro</label><select id="restLibro" style="width:100%;margin-bottom:10px">' + Object.keys(R.libros).map(function (k) { return '<option value="' + k + '"' + (k === lib ? ' selected' : '') + '>' + NOMBRE_LIBRO[k] + '</option>'; }).join('') + '</select>';
+  h += '<label style="font-size:13px;display:block;margin-bottom:4px">2. Pestaña</label><select id="restHoja" style="width:100%;margin-bottom:10px">' + hojas.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('') + '</select>';
+  h += '<label style="font-size:13px;display:block;margin-bottom:4px">3. Día (hay copias desde el 10/11/2026)</label><input id="restFecha" type="date" min="2026-11-10" max="' + R.hoy + '" value="' + R.hoy + '" style="width:100%;box-sizing:border-box">';
+  h += '<div class="acciones" style="justify-content:flex-start"><button class="btn pri" id="restIr">Restaurar</button></div>';
+  if (E.restAviso) h += '<div class="aviso info" style="margin-top:10px">' + E.restAviso + '</div>';
   return h + '</div>';
 }
 function vPin() {
@@ -2862,6 +2886,19 @@ function enlazarConfig() {
     rA.disabled = true; cargando(true);
     api('app_respaldoAhora').then(function (r) { E.respaldo = r; cargando(false); toast('Respaldo guardado'); pintar(); })
       .catch(function (e) { cargando(false); rA.disabled = false; toast('No se pudo: ' + e.message, 6000); });
+  });
+  var gG = $('#ghGuardar'), rL = $('#restLibro'), rI = $('#restIr');
+  if (gG) gG.addEventListener('click', function () {
+    gG.disabled = true;
+    api('app_githubToken', $('#ghTok').value).then(function () { E.restInfo = null; pintar(); toast('Acceso guardado'); }).catch(function (e) { gG.disabled = false; toast(e.message, 8000); });
+  });
+  if (rL) rL.addEventListener('change', function () { E.restLibro = rL.value; E.restAviso = ''; pintar(); });
+  if (rI) rI.addEventListener('click', function () {
+    var d = { libro: $('#restLibro').value, hoja: $('#restHoja').value, fecha: $('#restFecha').value };
+    rI.disabled = true; rI.textContent = 'Pidiendo…';
+    api('app_restaurar', d).then(function () {
+      E.restAviso = 'Listo. En 1 o 2 minutos aparece la pestaña <b>RESTAURADO ' + esc(d.hoja) + '</b> (borde naranja) al final del libro ' + NOMBRE_LIBRO[d.libro] + '.'; pintar();
+    }).catch(function (e) { rI.disabled = false; rI.textContent = 'Restaurar'; toast('No se pudo: ' + e.message, 7000); });
   });
   var rG = $('#repGuardar'), rE = $('#repEnviar');
   if (rG) rG.addEventListener('click', function () {
@@ -2902,7 +2939,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-11T16:58:47.740Z';
+  var VERSION = '2026-11-11T16:59:02.173Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
