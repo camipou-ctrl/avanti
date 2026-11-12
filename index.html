@@ -1184,7 +1184,7 @@ function vDistribucion(a) {
   h += '<button class="btn" data-imprimir-dist="agente">Imprimir para agentes</button><button class="btn pri" data-imprimir-dist="staff">Imprimir para staff</button></div>';
   var modo = E.distModo || 'staff';
   h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) +
-    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro de la agencia.' : 'Con toda la distribución: broker, gerente de ventas, coordinadores y lo que queda a la oficina.') + '</span></div>';
+    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro del ingreso de la agencia.' : 'Igual a la del agente, más los nombres y los coordinadores (1%), que salen del ingreso de la agencia.') + '</span></div>';
   var ver = E.distSel === 'todas' ? negs : negs.filter(function (n) { return n.clave === E.distSel; });
   h += ver.map(function (n) {
     var esp = n.filas.some(function (r) { return r.aj; });
@@ -1203,7 +1203,8 @@ function hojaDistribucion(n, a, paraAgente) {
   var ivaReg = reg * P.iva, ivaOf = Math.max(ivaReg - ivaAg, 0), neta = cb - reg - ivaOf;
   // Como lo muestra la administradora al agente: salen broker y gerente de ventas (la coordinación),
   // pero no los 1% de coordinador; esos quedan dentro del ingreso bruto de la agencia.
-  var cancelado = comAg + coord + broker + (paraAgente ? 0 : uno + extra), bruto = dist - cancelado, netoAg = bruto - ivaOf;
+  // Las dos versiones (agente y staff) dan los mismos totales; los coordinadores (1%) salen del ingreso de la agencia
+  var cancelado = comAg + coord + broker, bruto = dist - cancelado, netoAg = bruto - ivaOf;
   function p2(x) { return fmt.format((x || 0) * 100) + '%'; }
   function porDist(x) { return dist ? p2(x / dist) : ''; }
   function fila(t, pc, v, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + t + '</td><td class="d">' + (pc || '') + '</td><td class="d">' + (v === '' ? '' : fmt.format(v || 0)) + '</td></tr>'; }
@@ -1228,10 +1229,6 @@ function hojaDistribucion(n, a, paraAgente) {
   h += fila('COMISIÓN AGENTES', porDist(comAg), comAg);
   h += fila('BROKER' + (paraAgente ? '' : nom(P.broker[ag])), porDist(broker), broker);
   h += fila('GTE DE VENTAS ' + esc(ag.toUpperCase()) + (paraAgente ? '' : nom(P.coord[ag])), porDist(coord), coord);
-  if (!paraAgente) { // los 1% de coordinador no van en la hoja que se le entrega al agente
-    h += fila('COORDINADOR' + nom(P.uno[ag]), porDist(uno), uno);
-    if (extra) h += fila('COORDINADOR' + nom((P.extra || {}).persona), porDist(extra), extra);
-  }
   h += '</tbody></table>';
 
   h += '<div class="dist-sec">PAGO DE COMISIONES INDIVIDUALES</div>';
@@ -1260,6 +1257,11 @@ function hojaDistribucion(n, a, paraAgente) {
   h += fila('TOTAL INGRESO BRUTO AGENCIA', porDist(bruto), bruto);
   h += fila('IVA REGALÍA EMPRESA', '', ivaOf);
   h += fila('<b>TOTAL INGRESO NETO AGENCIA</b>', porDist(netoAg), netoAg, 'tot');
+  if (!paraAgente && (uno || extra)) { // solo en la versión staff: los coordinadores salen del ingreso de la agencia
+    if (uno) h += fila('(−) COORDINADOR' + nom(P.uno[ag]), porDist(uno), uno, 'det');
+    if (extra) h += fila('(−) COORDINADOR' + nom((P.extra || {}).persona), porDist(extra), extra, 'det');
+    h += fila('<b>QUEDA A LA OFICINA</b>', porDist(netoAg - uno - extra), netoAg - uno - extra, 'sub');
+  }
   if (spiff) h += fila('SPIFF entregado (aporte del propietario)', '', spiff);
   h += '</tbody></table>';
   h += '<div class="dist-firma"><div>Recibido por</div><div>Administración</div></div>';
@@ -1389,7 +1391,7 @@ function vSimulacion() {
   h += '<button class="btn" data-imprimir-dist="agente">Imprimir para agentes</button><button class="btn pri" data-imprimir-dist="staff">Imprimir para staff</button></div>';
   var modo = E.distModo || 'staff';
   h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) +
-    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro de la agencia.' : 'Con toda la distribución: broker, gerente de ventas, coordinadores y lo que queda a la oficina.') + '</span></div>';
+    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro del ingreso de la agencia.' : 'Igual a la del agente, más los nombres y los coordinadores (1%), que salen del ingreso de la agencia.') + '</span></div>';
 
   var S = simular(n), aj = simAjuste(n);
   // Ajustes (no se imprimen)
@@ -3176,7 +3178,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-12T21:26:43.496Z';
+  var VERSION = '2026-11-12T21:41:21.867Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
