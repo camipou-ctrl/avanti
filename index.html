@@ -274,6 +274,8 @@
   .dist-tit { font-size: 17px; font-weight: 800; color: var(--azul); letter-spacing: .3px; }
   .dist-n { font-size: 20px; font-weight: 800; color: var(--rojo); }
   .dist-des { font-size: 13px; line-height: 1.55; margin-bottom: 12px; }
+  .hoja-res tr.esp td { background: #fff6e5; }
+  .res-esp { margin-top: 10px; font-size: 11px; line-height: 1.5; border: 1px dashed var(--ambar); border-radius: 6px; padding: 6px 10px; background: #fffaf0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .dist-ver { font-size: 11px; font-weight: 700; color: var(--ambar); text-align: right; letter-spacing: .2px; }
   .dist-esp { font-size: 12px; border: 1px dashed var(--ambar); border-radius: 8px; padding: 8px 12px; background: #fffaf0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .dist-esp ul { margin: 2px 0 6px 18px; padding: 0; }
@@ -1208,7 +1210,7 @@ function filaNovus(r, ag) {
   var x = {}; Object.keys(r).forEach(function (k) { x[k] = r[k]; });
   x.dist = dist; x.comAg = dist * r.nivel; x.coord = dist * (r.pctCoord || 0); x.broker = dist * (P.pctBroker || 0);
   x.unoPct = dist * (t[ag] || 0); x.unoExtra = conExtra ? dist * X.pct : 0; x.spiff = 0; x.comp = 0; x.comparteCon = '';
-  x.cancelar = x.comAg - r.ivaAg; x.sinReparto = false;
+  x.cancelar = x.comAg - r.ivaAg; x.sinReparto = false; x.total = dist - x.coord - x.broker - x.unoPct - x.unoExtra;
   return x;
 }
 /* Qué cambia cada caso especial respecto a Novus (para la versión «con casos especiales»). */
@@ -1224,7 +1226,7 @@ function cambiosEspeciales(n, ag, paraAgente) {
     cambio('spiff', 'SPIFF');
     cambio('coord', 'Gerente de ventas' + (paraAgente ? '' : ' (' + (P.coord[ag] || '') + ')'));
     cambio('broker', 'Broker' + (paraAgente ? '' : ' (' + (P.broker[ag] || '') + ')'));
-    if (!paraAgente) { cambio('unoPct', 'Coordinador (' + (P.uno[ag] || '') + ')'); cambio('unoExtra', 'Coordinador (' + ((P.extra || {}).persona || '') + ')'); }
+    if (!paraAgente) { cambio('unoPct', 'Coordinador (' + (P.uno[ag] || '') + ')'); cambio('unoExtra', 'Coordinador (' + ((P.extra || {}).persona || '') + ')'); if (n.conTotal) cambio('total', 'Total agencia'); }
     if (lineas.length) out.push({ quien: corto(r.agente) + ' · ' + r.rol, lineas: lineas, nota: r.aj && r.aj.nota });
   });
   return out;
@@ -1470,10 +1472,14 @@ function vSimulacion() {
 
 /* Resumen Avanti / Avanti II para imprimir: todas las columnas, horizontal, máximo 2 páginas */
 function vResumenImpr(a) {
-  var D = E.datos, f = a.resumen, esII = a.agencia === 'Avanti II', hayExtra = f.some(function (r) { return r.unoExtra; });
-  var h = '<div class="barra-acc no-imprimir"><button class="btn" data-volver-cuadro>← Volver</button><span class="muted" style="font-size:13px">Sale en horizontal; si no cabe en una hoja, se reparte en dos.</span><button class="btn pri" data-imprimir-resumen>Imprimir</button></div>';
+  var version = E.resVer || 'novus', esEsp = function (r) { return !!(r.aj || r.comp || r.sinReparto); };
+  var D = E.datos, f = version === 'novus' ? a.resumen.map(function (r) { return filaNovus(r, a.agencia); }) : a.resumen;
+  var esII = a.agencia === 'Avanti II', hayExtra = f.some(function (r) { return r.unoExtra; });
+  var nEsp = a.resumen.filter(esEsp).length;
+  var h = '<div class="barra-acc no-imprimir"><button class="btn" data-volver-cuadro>← Volver</button>' + seg('resVer', [['novus', 'Tal cual Novus'], ['especial', 'Con casos especiales' + (nEsp ? ' (' + nEsp + ')' : '')]]) + '<span class="muted" style="font-size:13px">Sale en horizontal; si no cabe en una hoja, se reparte en dos.</span><button class="btn pri" data-imprimir-resumen>Imprimir</button></div>';
+  h += '<p class="muted no-imprimir" style="font-size:12px;margin:4px 0 8px">' + (version === 'novus' ? '<b>Tal cual Novus</b>: el resumen de siempre, con los montos del sistema y los porcentajes normales, sin casos especiales.' : '<b>Con casos especiales</b>: con los acuerdos de AJUSTES aplicados; las filas marcadas con ★ tienen caso especial y abajo se explica qué cambia respecto a Novus.') + '</p>';
   h += '<div class="res-wrap"><div class="hoja-res" id="hojaResumen">';
-  h += '<div class="res-tit"><b>RESUMEN ' + esc(a.agencia.toUpperCase()) + '</b><span>' + esc(D.mes) + ' ' + D.anio + '</span></div>';
+  h += '<div class="res-tit"><b>RESUMEN ' + esc(a.agencia.toUpperCase()) + (version === 'especial' ? ' · CON CASOS ESPECIALES' : '') + '</b><span>' + esc(D.mes) + ' ' + D.anio + '</span></div>';
   var cols = ['INDEX', 'NRO NEG.', 'CAPTADOR', 'COLOCADOR', 'NVL', 'INMUEBLE', 'TRANSACCIÓN', 'AGENCIA', 'DESCRIPCIÓN', 'MONTO OPERACIÓN', 'MONTO COMISIÓN', 'MONTO DE LA PUNTA', '5% REGALÍA', 'COMISIÓN A DIST.', 'CIERRE', 'COD.', '% NIVEL', '% COOR.', '%Coord Broker', esII ? '% Andrea' : '% Roman'].concat(hayExtra ? ['% ' + ((D.cuadro.distribucion || {}).extra || {}).persona] : []).concat(['Total']);
   h += '<table><thead><tr>' + cols.map(function (c, i) { return '<th' + (i >= 9 && i !== 14 && i !== 15 ? ' class="d"' : '') + '>' + c + '</th>'; }).join('') + '</tr></thead><tbody>';
   var idx = 0, ant = null, t = { monto: 0, punta: 0, regalia: 0, dist: 0, coord: 0, broker: 0, uno: 0, extra: 0, total: 0 }, vistos = {};
@@ -1481,12 +1487,24 @@ function vResumenImpr(a) {
     var nuevo = r.numero !== ant; ant = r.numero; if (nuevo) idx++;
     if (!vistos[r.codigo + '|' + r.numero]) { vistos[r.codigo + '|' + r.numero] = 1; t.monto += r.monto; }
     t.punta += r.punta; t.regalia += r.regalia; t.dist += r.dist; t.coord += r.coord; t.broker += r.broker; t.uno += r.unoPct; t.extra += r.unoExtra || 0; t.total += r.total;
-    h += '<tr class="' + (nuevo ? 'nuevo' : '') + '"><td>' + (nuevo ? idx : '') + '</td><td>' + r.numero + '</td><td class="nom">' + esc(r.captador) + '</td><td class="nom">' + esc(r.colocador) + '</td><td>' + pct(r.nivel) + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.operacion) + '</td><td>' + esc(r.agencia) + '</td><td class="des">' + esc(r.descripcion) + (r.sinReparto ? ' (sin reparto)' : '') + '</td>' +
+    var marca = version === 'especial' && esEsp(r);
+    h += '<tr class="' + (nuevo ? 'nuevo' : '') + (marca ? ' esp' : '') + '"><td>' + (nuevo ? idx : '') + (marca ? ' ★' : '') + '</td><td>' + r.numero + '</td><td class="nom">' + esc(r.captador) + '</td><td class="nom">' + esc(r.colocador) + '</td><td>' + pct(r.nivel) + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.operacion) + '</td><td>' + esc(r.agencia) + '</td><td class="des">' + esc(r.descripcion) + (r.sinReparto ? ' (sin reparto)' : '') + '</td>' +
       '<td class="d">' + fmt.format(r.monto) + '</td><td class="d">' + fmt.format(r.comision) + '</td><td class="d">' + fmt.format(r.punta) + '</td><td class="d">' + fmt.format(r.regalia) + '</td><td class="d">' + fmt.format(r.dist) + '</td>' +
       '<td>' + esc(r.cierre) + '</td><td>' + esc(r.codigo) + '</td><td class="d">' + fmt.format(r.pctCoord * 100) + '%</td><td class="d">' + fmt.format(r.coord) + '</td><td class="d">' + fmt.format(r.broker) + '</td><td class="d">' + fmt.format(r.unoPct) + '</td>' + (hayExtra ? '<td class="d">' + fmt.format(r.unoExtra || 0) + '</td>' : '') + '<td class="d"><b>' + fmt.format(r.total) + '</b></td></tr>';
   });
   h += '<tr class="tot"><td colspan="9" class="d">Total</td><td class="d">' + fmt.format(t.monto) + '</td><td></td><td class="d">' + fmt.format(t.punta) + '</td><td class="d">' + fmt.format(t.regalia) + '</td><td class="d">' + fmt.format(t.dist) + '</td><td></td><td></td><td></td><td class="d">' + fmt.format(t.coord) + '</td><td class="d">' + fmt.format(t.broker) + '</td><td class="d">' + fmt.format(t.uno) + '</td>' + (hayExtra ? '<td class="d">' + fmt.format(t.extra) + '</td>' : '') + '<td class="d">' + fmt.format(t.total) + '</td></tr>';
-  h += '</tbody></table></div></div>';
+  h += '</tbody></table>';
+  if (version === 'especial') {
+    var cam = [];
+    var vistosN = {};
+    a.resumen.forEach(function (r) { var k = r.mes + '|' + r.numero; if (esEsp(r) && !vistosN[k]) { vistosN[k] = 1; cambiosEspeciales({ conTotal: true, filas: a.resumen.filter(function (x) { return x.mes + '|' + x.numero === k; }) }, a.agencia, false).forEach(function (c) { c.numero = r.numero; cam.push(c); }); } });
+    if (cam.length) {
+      h += '<div class="res-esp"><b>CASOS ESPECIALES (qué cambia respecto a Novus)</b>';
+      cam.forEach(function (c) { h += '<div>★ <b>Nº ' + c.numero + ' · ' + esc(c.quien) + ':</b> ' + c.lineas.map(esc).join(' · ') + (c.nota ? ' <span class="muted">(' + esc(c.nota) + ')</span>' : '') + '</div>'; });
+      h += '</div>';
+    } else h += '<div class="res-esp">Este mes no hay casos especiales: es igual al de Novus.</div>';
+  }
+  h += '</div></div>';
   return h;
 }
 /* Ajusta el tamaño para que entre en 1 o 2 hojas horizontales (carta o A4). Se aplica justo antes de imprimir. */
@@ -3221,7 +3239,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-12T21:52:20.457Z';
+  var VERSION = '2026-11-12T21:56:17.985Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
