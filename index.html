@@ -1051,13 +1051,13 @@ function tablaStaff(ag, conEntregar) {
   lista.forEach(function (p) {
     var k = 'staff|' + ag + '|' + p.persona, abierto = E.abiertos[k];
     t.total += p.total; t.entregado += p.entregado; t.saldo += p.saldo;
-    h += '<tr class="click" data-abrir="' + esc(k) + '"><td><span class="nombre-ag">' + (abierto ? '▾ ' : '▸ ') + esc(p.persona) + '</span><div class="muted" style="font-size:12px">' + p.conceptos.map(function (c) { return esc(c.concepto); }).join(' · ') + ' · ' + p.detalle.length + ' neg.</div></td>' +
+    h += '<tr class="click" data-abrir="' + esc(k) + '"><td><span class="nombre-ag">' + (abierto ? '▾ ' : '▸ ') + esc(p.persona) + '</span><div class="muted" style="font-size:12px">' + p.conceptos.map(function (c) { return esc(c.concepto); }).join(' · ') + ' · ' + p.detalle.length + ' neg.' + (p.provisional ? ' · <span style="color:var(--ambar)">incluye ' + d(p.provisional) + ' cobrado que falta en Novus</span>' : '') + '</div></td>' +
       '<td class="d num">' + d(p.total) + '</td><td class="d num ocultar-movil">' + d(p.entregado) + '</td><td class="d num"><b>' + d(p.saldo) + '</b></td>' +
       (conEntregar ? '<td class="d"><button class="btn" style="padding:5px 9px;font-size:13px" data-entrega="' + esc(p.persona) + '" data-entrega-ag="' + esc(ag) + '">Entregar</button></td>' : '') + '</tr>';
     if (abierto) p.detalle.forEach(function (x) {
       var quienes = x.agentes.map(function (a) { return esc(corto(a.agente)) + ' (' + esc(a.rol.toLowerCase()) + (a.nivel ? ' ' + pct(a.nivel) : '') + ')'; }).join(', ');
-      h += '<tr class="detalle"><td colspan="5"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div>' + (esAnio() ? esc(x.mes) + ' · ' : '') + '<b>Nº ' + x.numero + '</b> · ' + esc(x.descripcion) +
-        '<div class="muted" style="font-size:12px">' + esc(x.concepto) + ' ' + p2(x.dist ? x.monto / x.dist : 0) + ' de ' + d(x.dist) + ' · ' + quienes + (x.codigo ? ' · #' + esc(x.codigo) : '') + '</div></div>' +
+      h += '<tr class="detalle"><td colspan="5"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div>' + (esAnio() ? esc(x.mes) + ' · ' : '') + (x.provisional ? '<span class="chip ambar" style="font-size:11px;padding:1px 6px">cobrada, falta en Novus</span> ' : '<b>Nº ' + x.numero + '</b> · ') + esc(x.descripcion) +
+        '<div class="muted" style="font-size:12px">' + esc(x.concepto) + ' ' + p2(x.dist ? x.monto / x.dist / (x.cobrado || 1) : 0) + ' de ' + d(x.dist) + (x.provisional && x.cobrado < 0.999 ? ' · solo se ha cobrado ' + d(x.pagado) + ' de ' + d(x.proyeccion) + ', le toca esa parte' : '') + ' · ' + quienes + (x.codigo ? ' · #' + esc(x.codigo) : '') + '</div></div>' +
         '<b class="num" style="white-space:nowrap">' + d(x.monto) + '</b></div></td></tr>';
     });
   });
@@ -2263,7 +2263,7 @@ function vProvisionales() {
   var t = { punta: 0, cancelar: 0, coord: 0, broker: 0, uno: 0, neto: 0 };
   lista.forEach(function (x) { t.punta += x.punta; t.cancelar += x.cancelar; t.coord += x.coord; t.broker += x.broker; t.uno += x.unoPct + x.unoExtra; t.neto += x.neto; });
   var h = '<div style="height:16px"></div><div class="card" style="border:2px dashed var(--ambar)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0">Cobradas que aún no están en el sistema <span class="chip ambar">provisional</span></h3><span class="muted" style="font-size:12px">' + lista.length + ' punta' + (lista.length > 1 ? 's' : '') + '</span></div>';
-  h += '<p class="muted" style="font-size:12px;margin:4px 0 10px">Están marcadas como pagadas en Negociaciones, pero Novus todavía no las trae. Su reparto se calcula con los mismos porcentajes y el último nivel del agente. <b>No suman</b> en los totales ni en las entregas al staff: pasan al cuadro normal cuando importes el listado.</p>';
+  h += '<p class="muted" style="font-size:12px;margin:4px 0 10px">Están marcadas como pagadas en Negociaciones, pero Novus todavía no las trae. Su reparto se calcula con los mismos porcentajes y el último nivel del agente. <b>Sí suman al reparto del staff</b> (ese dinero ya entró; si solo se cobró una parte, cuenta esa parte), pero no en los totales del cuadro: pasan al cuadro normal cuando importes el listado.</p>';
   h += '<div class="tabla-wrap"><table><thead><tr><th>Agente</th><th class="ocultar-movil">Negociación</th><th class="d">Nivel</th><th class="d">Punta</th><th class="d ocultar-movil">Staff</th><th class="d">A pagar</th></tr></thead><tbody>';
   lista.forEach(function (x) {
     h += '<tr><td><b>' + esc(corto(x.agente)) + '</b><div class="muted" style="font-size:12px">' + esc(x.rol) + (esAnio() ? ' · ' + esc(x.mes) : '') + '</div><div class="muted solo-movil" style="font-size:12px">' + esc(x.operacion) + ' · ' + esc(x.ubicacion) + '</div></td>' +
@@ -3239,7 +3239,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-12T21:56:17.985Z';
+  var VERSION = '2026-11-12T22:07:23.360Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
