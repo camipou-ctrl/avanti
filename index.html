@@ -274,6 +274,7 @@
   .dist-tit { font-size: 17px; font-weight: 800; color: var(--azul); letter-spacing: .3px; }
   .dist-n { font-size: 20px; font-weight: 800; color: var(--rojo); }
   .dist-des { font-size: 13px; line-height: 1.55; margin-bottom: 12px; }
+  .dist-sim { background: #fff6e5; border: 1px dashed var(--ambar); border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 600; margin-bottom: 10px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .dist-t { font-size: 13px; }
   .dist-t td { padding: 5px 8px; border-bottom: 1px solid #e6eaf1; }
   .dist-t tr.sub td { background: #eef3fc; font-weight: 700; }
@@ -408,6 +409,7 @@
       <div class="full"><label class="check"><input type="checkbox" name="caida"> Se cayó (no se borra, queda registrada)</label></div>
     </form>
     <div class="acciones">
+      <button class="btn" id="btnSimNeg" style="margin-right:auto;display:none">Simular cuadro de distribución</button>
       <button class="btn" data-cerrar>Cancelar</button>
       <button class="btn pri" id="btnGuardarNeg">Guardar</button>
     </div>
@@ -1016,15 +1018,11 @@ function vInicio() {
     E.pendientes = pendientes;
   }
 
-  // Staff
-  var per = D.cuadro.personal;
+  // Staff, separado por agencia (toca una persona para ver de qué negociación sale cada monto)
   h += '<div style="height:16px"></div><div class="barra-acc" style="margin-bottom:8px"><h3 style="margin:0">Reparto del staff</h3><button class="btn pri" data-entrega="">+ Registrar entrega o adelanto</button></div>';
-  if (per.length) {
-    h += '<div class="card pad0"><div class="tabla-wrap"><table><thead><tr><th>Persona</th><th class="d">Le toca</th><th class="d ocultar-movil">Entregado</th><th class="d">Saldo</th><th></th></tr></thead><tbody>';
-    per.forEach(function (p) {
-      h += '<tr><td class="nombre-ag">' + esc(p.persona) + '</td><td class="d num">' + d(p.total) + '</td><td class="d num ocultar-movil">' + d(p.entregado) + '</td><td class="d num"><b>' + d(p.saldo) + '</b></td><td class="d"><button class="btn" style="padding:5px 9px;font-size:13px" data-entrega="' + esc(p.persona) + '">Entregar</button></td></tr>';
-    });
-    h += '</tbody></table></div></div>';
+  if (D.cuadro.personal.length) {
+    h += '<div class="grid g2">' + ['Avanti', 'Avanti II'].map(function (ag) { return '<div><h3 style="margin:0 0 6px">' + ag + '</h3>' + tablaStaff(ag, true) + '</div>'; }).join('') + '</div>';
+    h += '<p class="muted" style="font-size:12px;margin:6px 0 0">Toca a una persona para ver de qué negociación sale cada monto. Las entregas anotadas sin agencia se reparten según lo que le toca en cada una.</p>';
   } else {
     h += '<div class="card muted">Todavía no hay comisiones del staff en este período. Igual puedes registrar un adelanto.</div>';
   }
@@ -1036,6 +1034,30 @@ function vInicio() {
     h += '<div style="height:16px"></div><div class="aviso">Hay <b>' + at.length + '</b> negociaciones de meses anteriores sin cobrar completo (' + d(tot) + '). <a href="#" data-ir="cobrar">Ver</a></div>';
   }
   return h;
+}
+/* Tabla del staff de una agencia: le toca, entregado y saldo; al tocar a alguien, el desglose por negociación */
+function tablaStaff(ag, conEntregar) {
+  var S = E.datos.cuadro.staff, lista = S ? (S[ag] || []) : [];
+  if (!S) return '<div class="card muted">Toca ⟳ Actualizar para ver el reparto por agencia.</div>';
+  if (!lista.length) return '<div class="card muted">Sin comisiones del staff en ' + esc(ag) + ' en este período.</div>';
+  function p2(x) { return fmt.format((x || 0) * 100) + '%'; }
+  var t = { total: 0, entregado: 0, saldo: 0 };
+  var h = '<div class="card pad0"><div class="tabla-wrap"><table><thead><tr><th>Persona</th><th class="d">Le toca</th><th class="d ocultar-movil">Entregado</th><th class="d">Saldo</th>' + (conEntregar ? '<th></th>' : '') + '</tr></thead><tbody>';
+  lista.forEach(function (p) {
+    var k = 'staff|' + ag + '|' + p.persona, abierto = E.abiertos[k];
+    t.total += p.total; t.entregado += p.entregado; t.saldo += p.saldo;
+    h += '<tr class="click" data-abrir="' + esc(k) + '"><td><span class="nombre-ag">' + (abierto ? '▾ ' : '▸ ') + esc(p.persona) + '</span><div class="muted" style="font-size:12px">' + p.conceptos.map(function (c) { return esc(c.concepto); }).join(' · ') + ' · ' + p.detalle.length + ' neg.</div></td>' +
+      '<td class="d num">' + d(p.total) + '</td><td class="d num ocultar-movil">' + d(p.entregado) + '</td><td class="d num"><b>' + d(p.saldo) + '</b></td>' +
+      (conEntregar ? '<td class="d"><button class="btn" style="padding:5px 9px;font-size:13px" data-entrega="' + esc(p.persona) + '" data-entrega-ag="' + esc(ag) + '">Entregar</button></td>' : '') + '</tr>';
+    if (abierto) p.detalle.forEach(function (x) {
+      var quienes = x.agentes.map(function (a) { return esc(corto(a.agente)) + ' (' + esc(a.rol.toLowerCase()) + (a.nivel ? ' ' + pct(a.nivel) : '') + ')'; }).join(', ');
+      h += '<tr class="detalle"><td colspan="5"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div>' + (esAnio() ? esc(x.mes) + ' · ' : '') + '<b>Nº ' + x.numero + '</b> · ' + esc(x.descripcion) +
+        '<div class="muted" style="font-size:12px">' + esc(x.concepto) + ' ' + p2(x.dist ? x.monto / x.dist : 0) + ' de ' + d(x.dist) + ' · ' + quienes + (x.codigo ? ' · #' + esc(x.codigo) : '') + '</div></div>' +
+        '<b class="num" style="white-space:nowrap">' + d(x.monto) + '</b></div></td></tr>';
+    });
+  });
+  h += '<tr class="total"><td>Total ' + esc(ag) + '</td><td class="d num">' + d(t.total) + '</td><td class="d num ocultar-movil">' + d(t.entregado) + '</td><td class="d num">' + d(t.saldo) + '</td>' + (conEntregar ? '<td></td>' : '') + '</tr>';
+  return h + '</tbody></table></div></div>';
 }
 function esAnio() { return E.datos && E.datos.mes === 'Año'; }
 function periodo() { return esAnio() ? 'todo ' + E.datos.anio : E.datos.mes + ' ' + E.datos.anio; }
@@ -1106,8 +1128,9 @@ function vCuadro() {
   var D = E.datos, a = D.cuadro.agencias.filter(function (x) { return x.agencia === E.agCuadro; })[0];
   if (E.vistaCuadro === 'resumen') return vResumenImpr(a);
   if (E.vistaCuadro === 'dist') return vDistribucion(a);
+  if (E.vistaCuadro === 'sim') return vSimulacion();
   var h = '<h2>Cuadro · ' + periodo() + '</h2><p class="sub">Lo que se le paga a cada agente y lo que queda para la oficina, según el listado del sistema.</p>';
-  h += '<div class="barra-filtros">' + seg('agCuadro', [['Avanti', 'Avanti'], ['Avanti II', 'Avanti II']]) + (a && a.resumen.length && !esAnio() ? '<button class="btn" data-dist>Cuadro de distribución</button><button class="btn pri" data-resumen>Imprimir Resumen ' + esc(E.agCuadro) + '</button>' : '') + '</div>';
+  h += '<div class="barra-filtros">' + seg('agCuadro', [['Avanti', 'Avanti'], ['Avanti II', 'Avanti II']]) + (a && a.resumen.length && !esAnio() ? '<button class="btn" data-dist>Cuadro de distribución</button><button class="btn pri" data-resumen>Imprimir Resumen ' + esc(E.agCuadro) + '</button>' : '') + '<button class="btn" data-sim-abrir="">Simular por cerrar</button></div>';
   var prov = vProvisionales();
   if (!a || !a.agentes.length) return h + '<div class="card vacio">No hay transacciones de ' + E.agCuadro + ' en ' + periodo() + ' en el sistema. Importa el listado de Novus.</div>' + prov;
   h += '<div class="grid g4">';
@@ -1133,11 +1156,7 @@ function vCuadro() {
     h += '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f0f2f6"><span>' + x[0] + '</span><span class="num">' + d(x[1]) + '</span></div>';
   });
   h += '<div style="display:flex;justify-content:space-between;padding:8px 0 0;font-weight:700"><span>Ingreso neto oficina</span><span class="num">' + d(a.netoOficina) + '</span></div><div class="muted" style="font-size:12px;margin-top:4px">Ya descuenta el 20% del IVA de la regalía que paga la oficina.</div></div>';
-  h += '<div class="card"><h3>Staff (las dos agencias)</h3>';
-  D.cuadro.personal.forEach(function (p) {
-    h += '<div style="padding:6px 0;border-bottom:1px solid #f0f2f6"><div style="display:flex;justify-content:space-between"><b>' + esc(p.persona) + '</b><b class="num">' + d(p.saldo) + '</b></div><div class="muted" style="font-size:12px">' + p.conceptos.map(function (c) { return esc(c.concepto) + ' ' + esc(c.agencia) + ' ' + d(c.monto); }).join(' · ') + (p.entregado ? ' · entregado −' + d(p.entregado) : '') + '</div></div>';
-  });
-  h += '</div></div>';
+  h += '<div><h3 style="margin:0 0 6px">Staff · ' + esc(a.agencia) + '</h3>' + tablaStaff(a.agencia, false) + '</div></div>';
   return h;
 }
 
@@ -1165,7 +1184,7 @@ function vDistribucion(a) {
   h += '<button class="btn" data-imprimir-dist="agente">Imprimir para agentes</button><button class="btn pri" data-imprimir-dist="staff">Imprimir para staff</button></div>';
   var modo = E.distModo || 'staff';
   h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) +
-    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'La misma hoja, sin el reparto del staff (broker, coordinación y 1%).' : 'Con toda la distribución: broker, coordinación y lo que queda a la oficina.') + '</span></div>';
+    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro de la agencia.' : 'Con toda la distribución: broker, gerente de ventas, coordinadores y lo que queda a la oficina.') + '</span></div>';
   var ver = E.distSel === 'todas' ? negs : negs.filter(function (n) { return n.clave === E.distSel; });
   h += ver.map(function (n) { return hojaDistribucion(n, a, modo === 'agente'); }).join('');
   return h;
@@ -1177,17 +1196,23 @@ function hojaDistribucion(n, a, paraAgente) {
   var cb = suma('punta'), reg = suma('regalia'), dist = suma('dist'), comAg = suma('comAg'), ivaAg = suma('ivaAg'), spiff = suma('spiff');
   var coord = suma('coord'), broker = suma('broker'), uno = suma('unoPct'), extra = suma('unoExtra');
   var ivaReg = reg * P.iva, ivaOf = Math.max(ivaReg - ivaAg, 0), neta = cb - reg - ivaOf;
-  var cancelado = comAg + coord + broker + uno + extra, bruto = dist - cancelado, netoAg = bruto - ivaOf;
+  // Como lo muestra la administradora al agente: salen broker y gerente de ventas (la coordinación),
+  // pero no los 1% de coordinador; esos quedan dentro del ingreso bruto de la agencia.
+  var cancelado = comAg + coord + broker + (paraAgente ? 0 : uno + extra), bruto = dist - cancelado, netoAg = bruto - ivaOf;
   function p2(x) { return fmt.format((x || 0) * 100) + '%'; }
   function porDist(x) { return dist ? p2(x / dist) : ''; }
   function fila(t, pc, v, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + t + '</td><td class="d">' + (pc || '') + '</td><td class="d">' + (v === '' ? '' : fmt.format(v || 0)) + '</td></tr>'; }
   var nivelDe = {}; f.forEach(function (r) { nivelDe[r.agente] = r.nivel; });
   function persona(rol, nombre) { return rol.toUpperCase() + ': ' + esc(nombre) + (nivelDe[nombre] ? ' ' + pct(nivelDe[nombre]) : ' (otra agencia)'); }
+  function nom(x) { return x ? ' (' + esc(x.toUpperCase()) + ')' : ''; }
+  var sim = n.sim, anio = n.anio || E.datos.anio;
 
   var h = '<div class="hoja hoja-dist">';
-  h += '<div class="dist-cab"><div><div class="dist-tit">CUADRO DE DISTRIBUCIÓN</div><div>' + esc(n.mes.toUpperCase()) + ' ' + E.datos.anio + ' · ' + esc(ag.toUpperCase()) + '</div></div><div class="dist-n">Nº ' + n.numero + '</div></div>';
-  h += '<div class="dist-des"><b>' + esc(r0.descripcion) + (r0.sinReparto ? ' (sin reparto)' : '') + '</b><br>' + persona('Captador', r0.captador) + '<br>' + persona('Colocador', r0.colocador) +
-    '<br><span class="muted">Código: ' + esc(r0.codigo || '—') + ' · Cierre: ' + esc(r0.cierre || '—') + ' · Monto: $' + fmt.format(r0.monto) + ' · Comisión total: $' + fmt.format(r0.comision) + '</span></div>';
+  h += '<div class="dist-cab"><div><div class="dist-tit">CUADRO DE DISTRIBUCIÓN</div><div>' + esc(n.mes.toUpperCase()) + ' ' + anio + ' · ' + esc(ag.toUpperCase()) + '</div></div><div class="dist-n">' + (sim ? 'SIMULACIÓN' : 'Nº ' + n.numero) + '</div></div>';
+  if (sim) h += '<div class="dist-sim">' + (sim.cobrada ? 'Cobrada, pero todavía no sale cerrada en el sistema' : 'Negociación sin cerrar' + (sim.avance ? ' (avance ' + pct(sim.avance) + (sim.status ? ', ' + esc(sim.status.toLowerCase()) : '') + ')' : '')) + '. Los montos son una estimación y pueden cambiar al cierre.</div>';
+  h += '<div class="dist-des"><b>' + esc(r0.descripcion) + (r0.sinReparto ? ' (sin reparto)' : '') + '</b><br>' +
+    (sim ? 'CAPTADOR: ' + sim.captador + '<br>COLOCADOR: ' + sim.colocador : persona('Captador', r0.captador) + '<br>' + persona('Colocador', r0.colocador)) +
+    '<br><span class="muted">' + (sim ? '' : 'Código: ' + esc(r0.codigo || '—') + ' · Cierre: ' + esc(r0.cierre || '—') + ' · ') + 'Monto: $' + fmt.format(r0.monto) + ' · Comisión total: $' + fmt.format(r0.comision) + '</span></div>';
   h += '<table class="dist-t"><tbody>';
   h += fila('<b>INGRESO COMISIÓN BRUTA</b>', '', cb, 'sub');
   h += fila('REGALÍA MASTER', p2(P.regalia), reg);
@@ -1196,11 +1221,11 @@ function hojaDistribucion(n, a, paraAgente) {
   h += fila('IVA a pagar agente', p2(P.ivaAgente), ivaAg, 'det');
   h += fila('<b>COMISIÓN NETA</b>', '', neta, 'sub');
   h += fila('COMISIÓN AGENTES', porDist(comAg), comAg);
-  if (!paraAgente) { // el reparto del staff no va en la hoja que se le entrega al agente
-    h += fila('BROKER ' + esc((P.broker[ag] || '').toUpperCase()), porDist(broker), broker);
-    h += fila('COORDINACIÓN ' + esc((P.coord[ag] || '').toUpperCase()), porDist(coord), coord);
-    h += fila('COORD. ' + esc((P.uno[ag] || '').toUpperCase()), porDist(uno), uno);
-    if (extra) h += fila('COORD. ' + esc(((P.extra || {}).persona || '').toUpperCase()), porDist(extra), extra);
+  h += fila('BROKER' + (paraAgente ? '' : nom(P.broker[ag])), porDist(broker), broker);
+  h += fila('GTE DE VENTAS ' + esc(ag.toUpperCase()) + (paraAgente ? '' : nom(P.coord[ag])), porDist(coord), coord);
+  if (!paraAgente) { // los 1% de coordinador no van en la hoja que se le entrega al agente
+    h += fila('COORDINADOR' + nom(P.uno[ag]), porDist(uno), uno);
+    if (extra) h += fila('COORDINADOR' + nom((P.extra || {}).persona), porDist(extra), extra);
   }
   h += '</tbody></table>';
 
@@ -1222,13 +1247,112 @@ function hojaDistribucion(n, a, paraAgente) {
 
   h += '<table class="dist-t" style="margin-top:12px"><tbody>';
   h += fila('<b>TOTAL CANCELADO</b>', porDist(cancelado), cancelado, 'sub');
-  h += fila('TOTAL INGRESO BRUTO AGENCIA', '', bruto);
+  h += fila('TOTAL INGRESO BRUTO AGENCIA', porDist(bruto), bruto);
   h += fila('IVA REGALÍA EMPRESA', '', ivaOf);
   h += fila('<b>TOTAL INGRESO NETO AGENCIA</b>', porDist(netoAg), netoAg, 'tot');
   if (spiff) h += fila('SPIFF entregado (aporte del propietario)', '', spiff);
   h += '</tbody></table>';
   h += '<div class="dist-firma"><div>Recibido por</div><div>Administración</div></div>';
   h += '</div>';
+  return h;
+}
+
+/* ───────── Simulación del Cuadro de distribución (negociaciones que no han cerrado) ─────────
+ * Mismo cálculo que el cuadro real: la punta es la mitad de la comisión (las dos si capta y coloca),
+ * regalía 5%, gerente de ventas y coordinador según el nivel (PARAMETROS), broker 7%.
+ * Se pueden cambiar la comisión y el % de cada agente (ej. dos captadores que se reparten la punta).
+ */
+function simAjuste(n) { E.simAj = E.simAj || {}; return E.simAj[n.fila] || (E.simAj[n.fila] = { comision: n.comision, pct: {} }); }
+function simDescripcion(n) { return (n.operacion + ' de ' + (n.tipo || 'inmueble') + (n.ubicacion ? ' en ' + n.ubicacion : '')).toUpperCase(); }
+function simular(n) {
+  var P = E.datos.cuadro.distribucion || {}, aj = simAjuste(n), T = P.tabla || {}, X = P.extra || {}, M = E.ini.meses;
+  var hojas = { 'Avanti': [], 'Avanti II': [] }, faltaNivel = [];
+  var mesN = n.anio * 12 + M.indexOf(n.mes);
+  function pctDe(i, j, a, cuantos) { var k = i + '|' + j; return aj.pct[k] != null ? aj.pct[k] : (a.nivel || 0) / cuantos; }
+  // Texto de cada lado para la cabecera: "Leyda González 30% / Belkis Prao 50%"
+  var cab = n.lados.map(function (l, i) {
+    var mios = l.agentes.filter(function (a) { return hojas[a.ag]; });
+    return l.agentes.map(function (a, j) {
+      if (!hojas[a.ag]) return esc(a.nombre) + ' (otra oficina)';
+      return esc(a.nombre) + ' ' + fmt0.format(pctDe(i, j, a, mios.length) * 100) + '%';
+    }).join(' / ');
+  });
+  n.lados.forEach(function (l, i) {
+    var porAg = {};
+    l.agentes.forEach(function (a, j) { if (hojas[a.ag]) (porAg[a.ag] = porAg[a.ag] || []).push({ a: a, j: j }); });
+    var ags = Object.keys(porAg);
+    ags.forEach(function (ag) {
+      var lista = porAg[ag];
+      var punta = (aj.comision || 0) / 2 * l.puntas / ags.length;
+      var reg = punta * (P.regalia || 0), dist = punta - reg;
+      var t = T[Math.round((lista[0].a.nivel || 0) * 100)] || { coord: 0, 'Avanti': 0, 'Avanti II': 0 };
+      var conExtra = ag === 'Avanti II' && X.pct && mesN >= X.desdeAnio * 12 + M.indexOf(X.desdeMes);
+      var ivaAgTot = reg * (P.iva || 0) * (P.ivaAgente || 0);
+      var pcts = lista.map(function (x) { return pctDe(i, x.j, x.a, lista.length); });
+      var suma = pcts.reduce(function (s, v) { return s + v; }, 0);
+      lista.forEach(function (x, k) {
+        if (!x.a.nivel && aj.pct[i + '|' + x.j] == null) faltaNivel.push(x.a.nombre);
+        var primero = k === 0, comAg = dist * pcts[k], ivaAg = suma ? ivaAgTot * pcts[k] / suma : ivaAgTot / lista.length;
+        hojas[ag].push({
+          agente: x.a.nombre, rol: l.rol, nivel: pcts[k], descripcion: simDescripcion(n), monto: n.monto, comision: aj.comision,
+          punta: primero ? punta : 0, regalia: primero ? reg : 0, dist: primero ? dist : 0,
+          coord: primero ? dist * t.coord : 0, broker: primero ? dist * (P.pctBroker || 0) : 0,
+          unoPct: primero ? dist * (t[ag] || 0) : 0, unoExtra: primero && conExtra ? dist * X.pct : 0,
+          comAg: comAg, ivaAg: ivaAg, spiff: 0, cancelar: comAg - ivaAg
+        });
+      });
+    });
+  });
+  var lados = { captador: cab[0] || '', colocador: n.lados.length > 1 ? cab[1] : cab[0] };
+  return { hojas: hojas, cab: lados, faltaNivel: faltaNivel };
+}
+function vSimulacion() {
+  var L = E.datos.cuadro.porCerrar, M = E.ini.meses;
+  var h = '<div class="barra-acc no-imprimir"><button class="btn" data-volver-cuadro>← Volver</button>';
+  if (!L || L.error) return h + '</div><div class="card vacio">' + (L && L.error ? 'No pude calcular: ' + esc(L.error) : 'Toca ⟳ Actualizar para traer las negociaciones por cerrar.') + '</div>';
+  if (!L.length) return h + '</div><div class="card vacio">No hay negociaciones sin cerrar en estos meses.</div>';
+  var n = L.filter(function (x) { return x.fila === E.simSel; })[0];
+  if (!n) { n = L.filter(function (x) { return x.mes === E.datos.mes && x.anio === E.datos.anio; })[0] || L[0]; E.simSel = n.fila; }
+  // Lista agrupada por mes
+  h += '<select id="selSim" class="campo" style="flex:1;min-width:200px;max-width:560px">';
+  var grupo = '';
+  L.forEach(function (x) {
+    var g = x.mes + ' ' + x.anio;
+    if (g !== grupo) { h += (grupo ? '</optgroup>' : '') + '<optgroup label="' + esc(g) + '">'; grupo = g; }
+    var cap = x.lados[0].agentes.map(function (a) { return corto(a.nombre); }).join('/'), col = x.lados.length > 1 ? x.lados[1].agentes.map(function (a) { return corto(a.nombre); }).join('/') : '';
+    h += '<option value="' + x.fila + '"' + (x.fila === n.fila ? ' selected' : '') + '>' + esc(cap) + (col ? ' → ' + esc(col) : ' (capta y coloca)') + ' · ' + esc(x.operacion) + ' ' + esc(x.tipo) + ' · ' + esc(x.ubicacion) + ' · ' + (x.porCobrar <= 0.005 && x.pagado > 0 ? 'cobrada, falta en el sistema' : pct(x.avance)) + '</option>';
+  });
+  h += '</optgroup></select>';
+  h += '<button class="btn" data-imprimir-dist="agente">Imprimir para agentes</button><button class="btn pri" data-imprimir-dist="staff">Imprimir para staff</button></div>';
+  var modo = E.distModo || 'staff';
+  h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) +
+    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro de la agencia.' : 'Con toda la distribución: broker, gerente de ventas, coordinadores y lo que queda a la oficina.') + '</span></div>';
+
+  var S = simular(n), aj = simAjuste(n);
+  // Ajustes (no se imprimen)
+  h += '<div class="card no-imprimir" style="margin:10px auto 14px;max-width:640px"><div class="card-t"><b>Ajustar la simulación</b><button class="btn" data-sim-reset style="padding:4px 10px;font-size:13px">Volver a los niveles</button></div>';
+  h += '<div class="form"><div><label>Comisión total ($)</label><input id="simCom" inputmode="decimal" value="' + fmt.format(aj.comision || 0) + '"></div>';
+  n.lados.forEach(function (l, i) {
+    var mios = l.agentes.filter(function (a) { return a.ag === 'Avanti' || a.ag === 'Avanti II'; }).length;
+    l.agentes.forEach(function (a, j) {
+      if (a.ag !== 'Avanti' && a.ag !== 'Avanti II') { h += '<div><label>' + esc(l.rol) + '</label><input disabled value="' + esc(a.nombre) + ' (otra oficina)"></div>'; return; }
+      var k = i + '|' + j, v = aj.pct[k] != null ? aj.pct[k] : (a.nivel || 0) / mios;
+      h += '<div><label>' + esc(l.rol) + ' · ' + esc(corto(a.nombre)) + ' (' + esc(a.ag) + ') %</label><input data-sim="' + k + '" inputmode="decimal" value="' + fmt.format(v * 100) + '"' + (!a.nivel && aj.pct[k] == null ? ' style="border-color:var(--ambar)"' : '') + '></div>';
+    });
+  });
+  h += '</div><p class="muted" style="font-size:12px;margin:8px 0 0">El % del agente sale de su último nivel en el sistema. Si son dos en la misma punta (escribe «Leyda / Belkis» en la negociación), se reparte a partes iguales; cámbialo aquí si el acuerdo es otro. El gerente de ventas y el coordinador salen del nivel del primer agente de cada punta.</p>';
+  if (S.faltaNivel.length) h += '<div class="aviso" style="margin-top:8px">No sé el nivel de ' + esc(S.faltaNivel.map(corto).join(', ')) + ' (todavía no tiene cierres en el sistema). Escribe su % arriba.</div>';
+  h += '</div>';
+
+  var desc = simDescripcion(n), hay = false;
+  ['Avanti', 'Avanti II'].forEach(function (ag) {
+    if (!S.hojas[ag].length) return;
+    hay = true;
+    var hoja = { mes: n.mes, anio: n.anio, numero: '', filas: S.hojas[ag], sim: { avance: n.avance, status: n.status, cobrada: n.porCobrar <= 0.005 && n.pagado > 0, captador: S.cab.captador, colocador: S.cab.colocador } };
+    hoja.filas[0].descripcion = desc;
+    h += hojaDistribucion(hoja, { agencia: ag }, modo === 'agente');
+  });
+  if (!hay) h += '<div class="card vacio">Ninguno de los agentes de esta negociación es de Avanti o Avanti II. Revisa los nombres en la negociación.</div>';
   return h;
 }
 
@@ -1377,7 +1501,8 @@ function aplicarCuadre(grupo, i, pagada) {
     datos = {
       fila: b.fila, agencia: b.agencia, codigo: t.codigo, captador: b.captador, colocador: b.colocador, mes: D.mes, anio: D.anio,
       operacion: b.operacion, tipo: b.tipo, ubicacion: b.ubicacion, monto: b.monto, comision: b.comision, proyeccion: b.proyeccion,
-      pagado: pagada ? b.proyeccion : b.pagado, avance: 100, fuente: b.fuente, status: b.status, comentarios: b.comentarios,
+      // si ya estaba cobrada, el avance se deja como está (cobrada con avance < 100% no es falla)
+      pagado: pagada ? b.proyeccion : b.pagado, avance: t.cobrada ? Math.round(b.avance * 100) : 100, fuente: b.fuente, status: b.status, comentarios: b.comentarios,
       fechaPago: pagada && !b.fechaPago ? t.fecha : b.fechaPago, caida: false
     };
   } else {
@@ -1598,7 +1723,7 @@ function enlazar() {
   if (E.tab === 'config') enlazarConfig();
   if (E.tab === 'chat') enlazarChat();
   if (E.tab === 'acm') enlazarAcm();
-  $$('[data-entrega]').forEach(function (b) { b.addEventListener('click', function () { abrirEntrega(b.dataset.entrega); }); });
+  $$('[data-entrega]').forEach(function (b) { b.addEventListener('click', function (ev) { ev.stopPropagation(); abrirEntrega(b.dataset.entrega, b.dataset.entregaAg || ''); }); });
   $$('[data-saldo]').forEach(function (b) { b.addEventListener('click', function () { abrirSaldo(E.pendientes[Number(b.dataset.saldo)]); }); });
   $$('[data-mas-metas]').forEach(function (b) { b.addEventListener('click', function (ev) { ev.stopPropagation(); var k = b.dataset.masMetas; E.analAbiertos[k] = !E.analAbiertos[k]; pintar(); }); });
   $$('[data-agente]').forEach(function (el) { el.addEventListener('click', function () { E.vistaAnal = { tipo: 'agente', hoja: el.dataset.agente }; pintar(); window.scrollTo(0, 0); }); });
@@ -1612,6 +1737,21 @@ function enlazar() {
   $$('[data-volver-cuadro]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = null; pintar(); }); });
   $$('[data-imprimir-resumen]').forEach(function (el) { el.addEventListener('click', imprimirResumen); });
   $$('[data-dist]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = 'dist'; E.distSel = null; pintar(); window.scrollTo(0, 0); }); });
+  $$('[data-sim-abrir]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = 'sim'; pintar(); window.scrollTo(0, 0); }); });
+  var selSim = $('#selSim');
+  if (selSim) selSim.addEventListener('change', function () { E.simSel = Number(selSim.value); pintar(); });
+  var simCom = $('#simCom');
+  if (simCom) simCom.addEventListener('change', function () {
+    var n = (E.datos.cuadro.porCerrar || []).filter(function (x) { return x.fila === E.simSel; })[0], v = numero(simCom.value);
+    if (n && v !== '') { simAjuste(n).comision = v; pintar(); }
+  });
+  $$('[data-sim]').forEach(function (el) { el.addEventListener('change', function () {
+    var n = (E.datos.cuadro.porCerrar || []).filter(function (x) { return x.fila === E.simSel; })[0], v = numero(el.value);
+    if (!n) return;
+    if (v === '') delete simAjuste(n).pct[el.dataset.sim]; else simAjuste(n).pct[el.dataset.sim] = v / 100;
+    pintar();
+  }); });
+  $$('[data-sim-reset]').forEach(function (el) { el.addEventListener('click', function () { if (E.simAj) delete E.simAj[E.simSel]; pintar(); }); });
   var selDist = $('#selDist');
   if (selDist) selDist.addEventListener('change', function () { E.distSel = selDist.value; pintar(); });
 }
@@ -1651,6 +1791,8 @@ function abrirNeg(fila) {
     f.fuente.value = 'Recursos propios';
   }
   f.dataset.tocadoComision = n ? '1' : ''; f.dataset.tocadoProy = n ? '1' : '';
+  var porCerrar = E.datos && Array.isArray(E.datos.cuadro.porCerrar) ? E.datos.cuadro.porCerrar : [];
+  $('#btnSimNeg').style.display = n && porCerrar.some(function (x) { return x.fila === n.fila; }) ? '' : 'none';
   $('#modalNeg').classList.add('on');
   setTimeout(function () { (n ? f.avance : f.captador).focus(); }, 50);
 }
@@ -1673,6 +1815,12 @@ function abrirNeg(fila) {
     if (a) { f.agencia.value = a.agencia === 'Avanti' ? 'A I' : 'A II'; auto(); }
   });
 })();
+$('#btnSimNeg').addEventListener('click', function () {
+  var fila = Number($('#formNeg').fila.value);
+  $('#modalNeg').classList.remove('on');
+  $('#tabs button[data-t="cuadro"]').click();
+  E.vistaCuadro = 'sim'; E.simSel = fila; pintar(); window.scrollTo(0, 0);
+});
 $('#btnGuardarNeg').addEventListener('click', function () {
   var f = $('#formNeg');
   if (!f.reportValidity()) return;
@@ -1771,14 +1919,16 @@ function abrirSaldo(x) {
 }
 
 /* Registrar una entrega o un adelanto cuando quieras (no hace falta que haya aviso) */
-function abrirEntrega(persona) {
+function abrirEntrega(persona, agencia) {
   var D = E.datos, nombres = ['Leyda', 'Verónica', 'Roman', 'Edgar', 'Andrea'];
   D.cuadro.personal.forEach(function (p) { if (nombres.indexOf(p.persona) < 0) nombres.push(p.persona); });
   var mesDef = esAnio() ? E.ini.meses[new Date().getMonth()] : D.mes;
-  var p = D.cuadro.personal.filter(function (x) { return x.persona === persona; })[0];
+  var S = D.cuadro.staff || {};
+  var p = agencia && S[agencia] ? S[agencia].filter(function (x) { return x.persona === persona; })[0] : D.cuadro.personal.filter(function (x) { return x.persona === persona; })[0];
   $('#tituloSaldo').textContent = 'Registrar entrega o adelanto';
   var h = '<div class="form">';
   h += '<div><label>Persona</label><select id="eP">' + nombres.map(function (n) { return '<option' + (n === persona ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '</select></div>';
+  h += '<div><label>Agencia</label><select id="eA">' + [['', 'Repartir según lo que le toca'], ['Avanti', 'Avanti'], ['Avanti II', 'Avanti II']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === (agencia || '') ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>';
   h += '<div><label>Mes del cuadro al que corresponde</label><select id="eM">' + E.ini.meses.map(function (m) { return '<option' + (m === mesDef ? ' selected' : '') + '>' + m + '</option>'; }).join('') + '</select></div>';
   h += '<div><label>Monto ($)</label><input id="eMonto" inputmode="decimal" value="' + (p && !esAnio() && p.saldo > 0 ? Math.round(p.saldo * 100) / 100 : '') + '"></div>';
   h += '<div><label>Fecha</label><input id="eF" type="date" value="' + hoyISO() + '"></div>';
@@ -1791,7 +1941,7 @@ function abrirEntrega(persona) {
     var monto = numero($('#eMonto').value);
     if (!monto) { toast('Escribe el monto'); return; }
     var b = this; b.disabled = true;
-    api('app_registrarEntrega', { persona: $('#eP').value, mes: $('#eM').value, anio: D.anio, monto: monto, fecha: $('#eF').value, nota: $('#eN').value })
+    api('app_registrarEntrega', { persona: $('#eP').value, agencia: $('#eA').value, mes: $('#eM').value, anio: D.anio, monto: monto, fecha: $('#eF').value, nota: $('#eN').value })
       .then(function () { $('#modalSaldo').classList.remove('on'); toast('Guardado'); cargarMes(); })
       .catch(function (e) { b.disabled = false; toast('No se guardó: ' + (e.message || e), 5000); });
   });
@@ -2949,7 +3099,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-11T17:09:16.314Z';
+  var VERSION = '2026-11-12T20:16:49.566Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
