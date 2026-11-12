@@ -1260,7 +1260,7 @@ function hojaDistribucion(n, a, paraAgente) {
 /* ───────── Simulación del Cuadro de distribución (negociaciones que no han cerrado) ─────────
  * Mismo cálculo que el cuadro real: la punta es la mitad de la comisión (las dos si capta y coloca),
  * regalía 5%, gerente de ventas y coordinador según el nivel (PARAMETROS), broker 7%.
- * Se pueden cambiar la comisión y el % de cada agente (ej. dos captadores que se reparten la punta).
+ * Se pueden cambiar la comisión y el % de cada agente (ej. una punta del sistema que se comparte con otra persona).
  */
 function simAjuste(n) { E.simAj = E.simAj || {}; return E.simAj[n.fila] || (E.simAj[n.fila] = { comision: n.comision, pct: {} }); }
 function simDescripcion(n) { return (n.operacion + ' de ' + (n.tipo || 'inmueble') + (n.ubicacion ? ' en ' + n.ubicacion : '')).toUpperCase(); }
@@ -1289,10 +1289,9 @@ function simular(n) {
       var conExtra = ag === 'Avanti II' && X.pct && mesN >= X.desdeAnio * 12 + M.indexOf(X.desdeMes);
       var ivaAgTot = reg * (P.iva || 0) * (P.ivaAgente || 0);
       var pcts = lista.map(function (x) { return pctDe(i, x.j, x.a, lista.length); });
-      var suma = pcts.reduce(function (s, v) { return s + v; }, 0);
       lista.forEach(function (x, k) {
         if (!x.a.nivel && aj.pct[i + '|' + x.j] == null) faltaNivel.push(x.a.nombre);
-        var primero = k === 0, comAg = dist * pcts[k], ivaAg = suma ? ivaAgTot * pcts[k] / suma : ivaAgTot / lista.length;
+        var primero = k === 0, comAg = dist * pcts[k], ivaAg = primero ? ivaAgTot : 0; // el IVA lo paga completo el que lleva la punta en el sistema (el primero)
         hojas[ag].push({
           agente: x.a.nombre, rol: l.rol, nivel: pcts[k], descripcion: simDescripcion(n), monto: n.monto, comision: aj.comision,
           punta: primero ? punta : 0, regalia: primero ? reg : 0, dist: primero ? dist : 0,
@@ -1340,7 +1339,7 @@ function vSimulacion() {
       h += '<div><label>' + esc(l.rol) + ' · ' + esc(corto(a.nombre)) + ' (' + esc(a.ag) + ') %</label><input data-sim="' + k + '" inputmode="decimal" value="' + fmt.format(v * 100) + '"' + (!a.nivel && aj.pct[k] == null ? ' style="border-color:var(--ambar)"' : '') + '></div>';
     });
   });
-  h += '</div><p class="muted" style="font-size:12px;margin:8px 0 0">El % del agente sale de su último nivel en el sistema. Si son dos en la misma punta (escribe «Leyda / Belkis» en la negociación), se reparte a partes iguales; cámbialo aquí si el acuerdo es otro. El gerente de ventas y el coordinador salen del nivel del primer agente de cada punta.</p>';
+  h += '</div><p class="muted" style="font-size:12px;margin:8px 0 0">El % del agente sale de su último nivel en el sistema. Si dos comparten una punta, escribe primero al que la lleva en el sistema (ej. «Belkis / Leyda»): ese paga todo el IVA. Se reparte a partes iguales; cámbialo aquí si el acuerdo es otro. El gerente de ventas y el coordinador salen del nivel del primer agente de cada punta.</p>';
   if (S.faltaNivel.length) h += '<div class="aviso" style="margin-top:8px">No sé el nivel de ' + esc(S.faltaNivel.map(corto).join(', ')) + ' (todavía no tiene cierres en el sistema). Escribe su % arriba.</div>';
   h += '</div>';
 
@@ -3099,7 +3098,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-12T20:16:49.566Z';
+  var VERSION = '2026-11-12T20:30:22.865Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
