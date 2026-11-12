@@ -274,6 +274,9 @@
   .dist-tit { font-size: 17px; font-weight: 800; color: var(--azul); letter-spacing: .3px; }
   .dist-n { font-size: 20px; font-weight: 800; color: var(--rojo); }
   .dist-des { font-size: 13px; line-height: 1.55; margin-bottom: 12px; }
+  .dist-ver { font-size: 11px; font-weight: 700; color: var(--ambar); text-align: right; letter-spacing: .2px; }
+  .dist-esp { font-size: 12px; border: 1px dashed var(--ambar); border-radius: 8px; padding: 8px 12px; background: #fffaf0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .dist-esp ul { margin: 2px 0 6px 18px; padding: 0; }
   .dist-sim { background: #fff6e5; border: 1px dashed var(--ambar); border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 600; margin-bottom: 10px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .dist-t { font-size: 13px; }
   .dist-t td { padding: 5px 8px; border-bottom: 1px solid #e6eaf1; }
@@ -1182,17 +1185,49 @@ function vDistribucion(a) {
   });
   h += '<option value="todas"' + (E.distSel === 'todas' ? ' selected' : '') + '>Todas (' + negs.length + ', una por hoja)</option></select>';
   h += '<button class="btn" data-imprimir-dist="agente">Imprimir para agentes</button><button class="btn pri" data-imprimir-dist="staff">Imprimir para staff</button></div>';
-  var modo = E.distModo || 'staff';
-  h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) +
-    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro del ingreso de la agencia.' : 'Igual a la del agente, más los nombres y los coordinadores (1%), que salen del ingreso de la agencia.') + '</span></div>';
+  var modo = E.distModo || 'staff', version = E.distVer || 'novus';
+  h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distVer', [['novus', 'Tal cual Novus'], ['especial', 'Con casos especiales']]) + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) + '</div>';
+  h += '<p class="muted no-imprimir" style="font-size:12px;margin:4px 0 0">' + (version === 'novus' ? '<b>Tal cual Novus</b>: los montos como salen en el sistema, sin ningún caso especial (el cuadro de siempre).' : '<b>Con casos especiales</b>: cómo se paga de verdad, con los acuerdos de AJUSTES y al final qué cambió respecto a Novus.') + ' ' +
+    (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro del ingreso de la agencia.' : 'Versión staff: igual a la del agente, más los nombres y los coordinadores (1%).') + '</p>';
   var ver = E.distSel === 'todas' ? negs : negs.filter(function (n) { return n.clave === E.distSel; });
   h += ver.map(function (n) {
-    var esp = n.filas.some(function (r) { return r.aj; });
+    var esp = n.filas.some(function (r) { return r.aj || r.comp || r.sinReparto; });
+    var hoja = version === 'novus' ? { mes: n.mes, numero: n.numero, clave: n.clave, filas: n.filas.map(function (r) { return filaNovus(r, a.agencia); }), version: 'novus' }
+      : { mes: n.mes, numero: n.numero, clave: n.clave, filas: n.filas, version: 'especial', esp: esp };
     return '<div class="no-imprimir" style="max-width:640px;margin:10px auto 6px;display:flex;justify-content:flex-end;gap:8px;align-items:center">' +
       (esp ? '<span class="chip ambar">Tiene caso especial</span>' : '') + '<button class="btn" data-especial="' + esc(n.clave) + '" style="padding:5px 10px;font-size:13px">✏️ Caso especial</button></div>' +
-      hojaDistribucion(n, a, modo === 'agente');
+      hojaDistribucion(hoja, a, modo === 'agente');
   }).join('');
   return h;
+}
+/* Una punta tal cual la trae Novus: comisión, regalía y nivel del sistema, con los porcentajes normales y sin AJUSTES. */
+function filaNovus(r, ag) {
+  var P = E.datos.cuadro.distribucion || {}, T = P.tabla || {}, X = P.extra || {}, M = E.ini.meses;
+  var dist = r.punta - r.regalia, t = T[Math.round((r.nivel || 0) * 100)] || {};
+  var conExtra = ag === 'Avanti II' && X.pct && (E.datos.anio * 12 + M.indexOf(r.mes)) >= (X.desdeAnio * 12 + M.indexOf(X.desdeMes));
+  var x = {}; Object.keys(r).forEach(function (k) { x[k] = r[k]; });
+  x.dist = dist; x.comAg = dist * r.nivel; x.coord = dist * (r.pctCoord || 0); x.broker = dist * (P.pctBroker || 0);
+  x.unoPct = dist * (t[ag] || 0); x.unoExtra = conExtra ? dist * X.pct : 0; x.spiff = 0; x.comp = 0; x.comparteCon = '';
+  x.cancelar = x.comAg - r.ivaAg; x.sinReparto = false;
+  return x;
+}
+/* Qué cambia cada caso especial respecto a Novus (para la versión «con casos especiales»). */
+function cambiosEspeciales(n, ag, paraAgente) {
+  var P = E.datos.cuadro.distribucion || {}, out = [];
+  n.filas.forEach(function (r) {
+    if (!(r.aj || r.comp || r.sinReparto)) return;
+    var nv = filaNovus(r, ag), lineas = [];
+    function cambio(k, txt) { if (Math.abs((r[k] || 0) - (nv[k] || 0)) > 0.005) lineas.push(txt + ': Novus ' + fmt.format(nv[k] || 0) + ' → ' + fmt.format(r[k] || 0)); }
+    if (r.sinReparto) lineas.push('Sin reparto (sin gerente, broker ni coordinador)');
+    cambio('comAg', 'Comisión de ' + corto(r.agente));
+    if (r.comp) lineas.push(corto(r.comparteCon) + ' recibe ' + fmt.format(r.comp) + ' de la punta de ' + corto(r.agente) + ' (sin IVA)');
+    cambio('spiff', 'SPIFF');
+    cambio('coord', 'Gerente de ventas' + (paraAgente ? '' : ' (' + (P.coord[ag] || '') + ')'));
+    cambio('broker', 'Broker' + (paraAgente ? '' : ' (' + (P.broker[ag] || '') + ')'));
+    if (!paraAgente) { cambio('unoPct', 'Coordinador (' + (P.uno[ag] || '') + ')'); cambio('unoExtra', 'Coordinador (' + ((P.extra || {}).persona || '') + ')'); }
+    if (lineas.length) out.push({ quien: corto(r.agente) + ' · ' + r.rol, lineas: lineas, nota: r.aj && r.aj.nota });
+  });
+  return out;
 }
 function hojaDistribucion(n, a, paraAgente) {
   var P = E.datos.cuadro.distribucion || { regalia: 0.05, iva: 0.16, ivaAgente: 0.8, coord: {}, broker: {}, uno: {} };
@@ -1214,7 +1249,7 @@ function hojaDistribucion(n, a, paraAgente) {
   var sim = n.sim, anio = n.anio || E.datos.anio;
 
   var h = '<div class="hoja hoja-dist">';
-  h += '<div class="dist-cab"><div><div class="dist-tit">CUADRO DE DISTRIBUCIÓN</div><div>' + esc(n.mes.toUpperCase()) + ' ' + anio + ' · ' + esc(ag.toUpperCase()) + '</div></div><div class="dist-n">' + (sim ? 'SIMULACIÓN' : 'Nº ' + n.numero) + '</div></div>';
+  h += '<div class="dist-cab"><div><div class="dist-tit">CUADRO DE DISTRIBUCIÓN</div><div>' + esc(n.mes.toUpperCase()) + ' ' + anio + ' · ' + esc(ag.toUpperCase()) + '</div></div><div class="dist-n">' + (sim ? 'SIMULACIÓN' : 'Nº ' + n.numero) + (n.version === 'especial' && n.esp ? '<div class="dist-ver">con casos especiales</div>' : '') + '</div></div>';
   if (sim) h += '<div class="dist-sim">' + (sim.cobrada ? 'Cobrada, pero todavía no sale cerrada en el sistema' : 'Negociación sin cerrar' + (sim.avance ? ' (avance ' + pct(sim.avance) + (sim.status ? ', ' + esc(sim.status.toLowerCase()) : '') + ')' : '')) + '. Los montos son una estimación y pueden cambiar al cierre.</div>';
   h += '<div class="dist-des"><b>' + esc(r0.descripcion) + (r0.sinReparto ? ' (sin reparto)' : '') + '</b><br>' +
     (sim ? 'CAPTADOR: ' + sim.captador + '<br>COLOCADOR: ' + sim.colocador : persona('Captador', r0.captador) + '<br>' + persona('Colocador', r0.colocador)) +
@@ -1264,6 +1299,14 @@ function hojaDistribucion(n, a, paraAgente) {
   }
   if (spiff) h += fila('SPIFF entregado (aporte del propietario)', '', spiff);
   h += '</tbody></table>';
+  if (n.version === 'especial') {
+    var cam = cambiosEspeciales(n, ag, paraAgente);
+    if (cam.length) {
+      h += '<div class="dist-sec">CASOS ESPECIALES (qué cambia respecto a Novus)</div><div class="dist-esp">';
+      cam.forEach(function (c) { h += '<div><b>' + esc(c.quien) + '</b><ul>' + c.lineas.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>' + (c.nota ? '<div class="muted">' + esc(c.nota) + '</div>' : '') + '</div>'; });
+      h += '</div>';
+    }
+  }
   h += '<div class="dist-firma"><div>Recibido por</div><div>Administración</div></div>';
   h += '</div>';
   return h;
@@ -3178,7 +3221,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-12T21:41:21.867Z';
+  var VERSION = '2026-11-12T21:52:20.457Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
