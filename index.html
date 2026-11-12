@@ -1186,14 +1186,19 @@ function vDistribucion(a) {
   h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) +
     '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro de la agencia.' : 'Con toda la distribución: broker, gerente de ventas, coordinadores y lo que queda a la oficina.') + '</span></div>';
   var ver = E.distSel === 'todas' ? negs : negs.filter(function (n) { return n.clave === E.distSel; });
-  h += ver.map(function (n) { return hojaDistribucion(n, a, modo === 'agente'); }).join('');
+  h += ver.map(function (n) {
+    var esp = n.filas.some(function (r) { return r.aj; });
+    return '<div class="no-imprimir" style="max-width:640px;margin:10px auto 6px;display:flex;justify-content:flex-end;gap:8px;align-items:center">' +
+      (esp ? '<span class="chip ambar">Tiene caso especial</span>' : '') + '<button class="btn" data-especial="' + esc(n.clave) + '" style="padding:5px 10px;font-size:13px">✏️ Caso especial</button></div>' +
+      hojaDistribucion(n, a, modo === 'agente');
+  }).join('');
   return h;
 }
 function hojaDistribucion(n, a, paraAgente) {
   var P = E.datos.cuadro.distribucion || { regalia: 0.05, iva: 0.16, ivaAgente: 0.8, coord: {}, broker: {}, uno: {} };
   var f = n.filas, r0 = f[0], ag = a.agencia;
   function suma(k) { return f.reduce(function (s, r) { return s + (r[k] || 0); }, 0); }
-  var cb = suma('punta'), reg = suma('regalia'), dist = suma('dist'), comAg = suma('comAg'), ivaAg = suma('ivaAg'), spiff = suma('spiff');
+  var cb = suma('punta'), reg = suma('regalia'), dist = suma('dist'), comAg = suma('comAg') + suma('comp'), ivaAg = suma('ivaAg'), spiff = suma('spiff');
   var coord = suma('coord'), broker = suma('broker'), uno = suma('unoPct'), extra = suma('unoExtra');
   var ivaReg = reg * P.iva, ivaOf = Math.max(ivaReg - ivaAg, 0), neta = cb - reg - ivaOf;
   // Como lo muestra la administradora al agente: salen broker y gerente de ventas (la coordinación),
@@ -1236,6 +1241,11 @@ function hojaDistribucion(n, a, paraAgente) {
     var x = personas[pos[r.agente]];
     x.roles.push(r.rol); x.comAg += r.comAg; x.spiff += r.spiff; x.ivaAg += r.ivaAg; x.cancelar += r.cancelar;
   });
+  // Casos especiales: la parte de una punta que va a otra persona (no paga IVA; lo paga el del sistema)
+  f.forEach(function (r) {
+    if (!r.comp || !r.comparteCon) return;
+    personas.push({ nombre: r.comparteCon, roles: ['Parte de la punta de ' + corto(r.agente)], comAg: r.comp, spiff: 0, ivaAg: 0, cancelar: r.comp });
+  });
   personas.forEach(function (x) {
     h += '<table class="dist-t dist-ag"><tbody><tr class="sub"><td>' + esc(x.nombre.toUpperCase()) + '</td><td class="d muted" style="font-weight:500">' + (x.roles.length > 1 ? 'Doble punta' : esc(x.roles[0])) + '</td><td class="d"></td></tr>';
     h += fila('Comisiones', '', x.comAg);
@@ -1255,6 +1265,54 @@ function hojaDistribucion(n, a, paraAgente) {
   h += '<div class="dist-firma"><div>Recibido por</div><div>Administración</div></div>';
   h += '</div>';
   return h;
+}
+
+/* ───────── Caso especial de una negociación (hoja AJUSTES): sin reparto, comisión acordada, SPIFF, comparte con… ───────── */
+function abrirEspecial(n, agencia) {
+  var r0 = n.filas[0];
+  $('#tituloSaldo').textContent = 'Caso especial · Nº ' + n.numero + ' ' + agencia;
+  var h = '<p class="muted" style="margin:0 0 10px;font-size:13px">' + esc(r0.descripcion) + '. Se guarda en la hoja AJUSTES, punta por punta. Deja en blanco lo que va normal.</p>';
+  n.filas.forEach(function (r, i) {
+    var a = r.aj || {}, v = function (x) { return x === '' || x == null ? '' : fmt.format(x); };
+    h += '<div class="card" style="margin-bottom:10px" data-punta="' + i + '"><b>' + esc(corto(r.agente)) + '</b> <span class="muted" style="font-size:12px">· ' + esc(r.rol) + ' · nivel ' + pct(r.nivel) + ' · a distribuir ' + d(r.dist) + ' · #' + esc(r.codigo) + '</span>';
+    h += '<div class="form" style="margin-top:8px">';
+    h += '<div class="full"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" data-k="sinReparto"' + (a.sinReparto ? ' checked' : '') + ' style="width:18px;height:18px"> Sin reparto (sin gerente, broker ni coordinador)</label></div>';
+    h += '<div><label>Comparte su punta con</label><input data-k="comparteCon" list="lstAgentes" value="' + esc(a.comparteCon || '') + '" placeholder="Ej.: Leyda"></div>';
+    h += '<div><label>% para esa persona</label><input data-k="pctComparte" inputmode="decimal" value="' + (a.pctComparte ? fmt.format(a.pctComparte * 100) : '') + '" placeholder="Ej.: 30"></div>';
+    h += '<div><label>Comisión acordada del agente ($)</label><input data-k="acordada" inputmode="decimal" value="' + v(a.acordada) + '" placeholder="Normal: ' + fmt.format(r.dist * r.nivel) + '"></div>';
+    h += '<div><label>SPIFF ($)</label><input data-k="spiff" inputmode="decimal" value="' + v(a.spiff) + '"></div>';
+    h += '<div><label>Gerente de ventas manual ($)</label><input data-k="coord" inputmode="decimal" value="' + v(a.coord) + '"></div>';
+    h += '<div><label>Broker manual ($)</label><input data-k="broker" inputmode="decimal" value="' + v(a.broker) + '"></div>';
+    h += '<div><label>Coordinador 1% manual ($)</label><input data-k="uno" inputmode="decimal" value="' + v(a.uno) + '"></div>';
+    h += '<div><label>Descripción distinta</label><input data-k="descripcion" value="' + esc(a.descripcion || '') + '"></div>';
+    h += '<div class="full"><label>Nota (por qué)</label><input data-k="nota" value="' + esc(a.nota || '') + '" placeholder="Ej.: Jardín es captación de Leyda"></div>';
+    h += '</div></div>';
+  });
+  h += '<p class="muted" style="font-size:12px;margin:0 0 8px">«Comparte su punta»: esa persona se lleva ese % de lo a distribuir y se le resta al agente; el IVA de la regalía lo sigue pagando completo el agente que lleva la punta en el sistema.</p>';
+  h += '<div class="acciones"><button class="btn" data-cerrar>Cancelar</button><button class="btn pri" id="espOk">Guardar</button></div>';
+  $('#cuerpoSaldo').innerHTML = h;
+  $('#modalSaldo').classList.add('on');
+  $('#espOk').addEventListener('click', function () {
+    var b = this, datos = [];
+    try {
+      $$('[data-punta]', $('#cuerpoSaldo')).forEach(function (c) {
+        var r = n.filas[Number(c.dataset.punta)], x = { codigo: r.codigo, agente: r.agente };
+        $$('[data-k]', c).forEach(function (inp) {
+          var k = inp.dataset.k;
+          if (inp.type === 'checkbox') x[k] = inp.checked;
+          else if (['comparteCon', 'descripcion', 'nota'].indexOf(k) >= 0) x[k] = inp.value.trim();
+          else x[k] = numero(inp.value);
+        });
+        if (x.comparteCon && !x.pctComparte) throw new Error('Falta el % para ' + x.comparteCon + ' en la punta de ' + corto(r.agente));
+        datos.push(x);
+      });
+    } catch (e) { toast(e.message, 4000); return; }
+    b.disabled = true;
+    var cadena = Promise.resolve();
+    datos.forEach(function (x) { cadena = cadena.then(function () { return api('app_guardarAjuste', x); }); });
+    cadena.then(function () { $('#modalSaldo').classList.remove('on'); toast('Caso especial guardado'); cargarMes(); })
+      .catch(function (e) { b.disabled = false; toast('No se guardó: ' + (e.message || e), 6000); });
+  });
 }
 
 /* ───────── Simulación del Cuadro de distribución (negociaciones que no han cerrado) ─────────
@@ -1736,6 +1794,11 @@ function enlazar() {
   $$('[data-volver-cuadro]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = null; pintar(); }); });
   $$('[data-imprimir-resumen]').forEach(function (el) { el.addEventListener('click', imprimirResumen); });
   $$('[data-dist]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = 'dist'; E.distSel = null; pintar(); window.scrollTo(0, 0); }); });
+  $$('[data-especial]').forEach(function (el) { el.addEventListener('click', function () {
+    var a = E.datos.cuadro.agencias.filter(function (x) { return x.agencia === E.agCuadro; })[0];
+    var n = negociacionesDist(a).filter(function (x) { return x.clave === el.dataset.especial; })[0];
+    if (n) abrirEspecial(n, a.agencia);
+  }); });
   $$('[data-sim-abrir]').forEach(function (el) { el.addEventListener('click', function () { E.vistaCuadro = 'sim'; pintar(); window.scrollTo(0, 0); }); });
   var selSim = $('#selSim');
   if (selSim) selSim.addEventListener('change', function () { E.simSel = Number(selSim.value); pintar(); });
@@ -3098,7 +3161,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-12T20:30:22.865Z';
+  var VERSION = '2026-11-12T20:37:27.508Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
