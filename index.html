@@ -1277,14 +1277,14 @@ function abrirEspecial(n, agencia) {
     h += '<div class="card" style="margin-bottom:10px" data-punta="' + i + '"><b>' + esc(corto(r.agente)) + '</b> <span class="muted" style="font-size:12px">· ' + esc(r.rol) + ' · nivel ' + pct(r.nivel) + ' · a distribuir ' + d(r.dist) + ' · #' + esc(r.codigo) + '</span>';
     h += '<div class="form" style="margin-top:8px">';
     h += '<div class="full"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" data-k="sinReparto"' + (a.sinReparto ? ' checked' : '') + ' style="width:18px;height:18px"> Sin reparto (sin gerente, broker ni coordinador)</label></div>';
-    h += '<div class="full"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" data-k="sinCoord"' + (a.coord === 0 ? ' checked' : '') + ' style="width:18px;height:18px"> Sin gerente de ventas (no aplica % de coordinación)</label></div>';
+    h += '<div class="full"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" data-k="sinCoord"' + (a.coord === 0 && a.uno === 0 ? ' checked' : '') + ' style="width:18px;height:18px"> Sin gerente de ventas ni coordinador (el broker sí se paga)</label></div>';
     h += '<div><label>Comparte su punta con</label><input data-k="comparteCon" list="lstAgentes" value="' + esc(a.comparteCon || '') + '" placeholder="Ej.: Leyda"></div>';
     h += '<div><label>% para esa persona</label><input data-k="pctComparte" inputmode="decimal" value="' + (a.pctComparte ? fmt.format(a.pctComparte * 100) : '') + '" placeholder="Ej.: 30"></div>';
     h += '<div><label>Comisión acordada del agente ($)</label><input data-k="acordada" inputmode="decimal" value="' + v(a.acordada) + '" placeholder="Normal: ' + fmt.format(r.dist * r.nivel) + '"></div>';
     h += '<div><label>SPIFF ($)</label><input data-k="spiff" inputmode="decimal" value="' + v(a.spiff) + '"></div>';
-    h += '<div><label>Gerente de ventas manual ($)</label><input data-k="coord" inputmode="decimal" value="' + (a.coord === 0 ? '' : v(a.coord)) + '"' + (a.coord === 0 ? ' disabled' : '') + '></div>';
+    h += '<div><label>Gerente de ventas manual ($)</label><input data-k="coord" inputmode="decimal" value="' + (a.coord === 0 && a.uno === 0 ? '' : v(a.coord)) + '"' + (a.coord === 0 && a.uno === 0 ? ' disabled' : '') + '></div>';
     h += '<div><label>Broker manual ($)</label><input data-k="broker" inputmode="decimal" value="' + v(a.broker) + '"></div>';
-    h += '<div><label>Coordinador 1% manual ($)</label><input data-k="uno" inputmode="decimal" value="' + v(a.uno) + '"></div>';
+    h += '<div><label>Coordinador 1% manual ($)</label><input data-k="uno" inputmode="decimal" value="' + (a.coord === 0 && a.uno === 0 ? '' : v(a.uno)) + '"' + (a.coord === 0 && a.uno === 0 ? ' disabled' : '') + '></div>';
     h += '<div><label>Descripción distinta</label><input data-k="descripcion" value="' + esc(a.descripcion || '') + '"></div>';
     h += '<div class="full"><label>Nota (por qué)</label><input data-k="nota" value="' + esc(a.nota || '') + '" placeholder="Ej.: Jardín es captación de Leyda"></div>';
     h += '</div></div>';
@@ -1294,7 +1294,7 @@ function abrirEspecial(n, agencia) {
   $('#cuerpoSaldo').innerHTML = h;
   $('#modalSaldo').classList.add('on');
   $$('[data-k="sinCoord"]', $('#cuerpoSaldo')).forEach(function (c) {
-    c.addEventListener('change', function () { var m = $('[data-k="coord"]', c.closest('[data-punta]')); m.disabled = c.checked; if (c.checked) m.value = ''; });
+    c.addEventListener('change', function () { ['coord', 'uno'].forEach(function (k) { var m = $('[data-k="' + k + '"]', c.closest('[data-punta]')); m.disabled = c.checked; if (c.checked) m.value = ''; }); });
   });
   $('#espOk').addEventListener('click', function () {
     var b = this, datos = [];
@@ -1307,7 +1307,7 @@ function abrirEspecial(n, agencia) {
           else if (['comparteCon', 'descripcion', 'nota'].indexOf(k) >= 0) x[k] = inp.value.trim();
           else x[k] = numero(inp.value);
         });
-        if (x.sinCoord) x.coord = 0;
+        if (x.sinCoord) { x.coord = 0; x.uno = 0; }
         delete x.sinCoord;
         if (x.comparteCon && !x.pctComparte) throw new Error('Falta el % para ' + x.comparteCon + ' en la punta de ' + corto(r.agente));
         datos.push(x);
@@ -1360,7 +1360,7 @@ function simular(n) {
           agente: x.a.nombre, rol: l.rol, nivel: pcts[k], descripcion: simDescripcion(n), monto: n.monto, comision: aj.comision,
           punta: primero ? punta : 0, regalia: primero ? reg : 0, dist: primero ? dist : 0,
           coord: primero && !(aj.sinCoord || {})[i] ? dist * t.coord : 0, broker: primero ? dist * (P.pctBroker || 0) : 0,
-          unoPct: primero ? dist * (t[ag] || 0) : 0, unoExtra: primero && conExtra ? dist * X.pct : 0,
+          unoPct: primero && !(aj.sinCoord || {})[i] ? dist * (t[ag] || 0) : 0, unoExtra: primero && conExtra && !(aj.sinCoord || {})[i] ? dist * X.pct : 0,
           comAg: comAg, ivaAg: ivaAg, spiff: 0, cancelar: comAg - ivaAg
         });
       });
@@ -1405,7 +1405,7 @@ function vSimulacion() {
   });
   n.lados.forEach(function (l, i) {
     if (!l.agentes.some(function (a) { return a.ag === 'Avanti' || a.ag === 'Avanti II'; })) return;
-    h += '<div class="full"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" data-sim-sincoord="' + i + '"' + ((aj.sinCoord || {})[i] ? ' checked' : '') + ' style="width:18px;height:18px"> ' + esc(l.rol) + ': sin gerente de ventas (no aplica % de coordinación)</label></div>';
+    h += '<div class="full"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" data-sim-sincoord="' + i + '"' + ((aj.sinCoord || {})[i] ? ' checked' : '') + ' style="width:18px;height:18px"> ' + esc(l.rol) + ': sin gerente de ventas ni coordinador (el broker sí se paga)</label></div>';
   });
   h += '</div><p class="muted" style="font-size:12px;margin:8px 0 0">El % del agente sale de su último nivel en el sistema. Si dos comparten una punta, escribe primero al que la lleva en el sistema (ej. «Belkis / Leyda»): ese paga todo el IVA. Se reparte a partes iguales; cámbialo aquí si el acuerdo es otro. El gerente de ventas y el coordinador salen del nivel del primer agente de cada punta.</p>';
   if (S.faltaNivel.length) h += '<div class="aviso" style="margin-top:8px">No sé el nivel de ' + esc(S.faltaNivel.map(corto).join(', ')) + ' (todavía no tiene cierres en el sistema). Escribe su % arriba.</div>';
@@ -3176,7 +3176,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-12T21:23:28.097Z';
+  var VERSION = '2026-11-12T21:26:43.496Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
