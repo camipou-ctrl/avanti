@@ -276,6 +276,7 @@
   .dist-des { font-size: 13px; line-height: 1.55; margin-bottom: 12px; }
   .hoja-res tr.esp td { background: #fff6e5; }
   .res-esp { margin-top: 10px; font-size: 11px; line-height: 1.5; border: 1px dashed var(--ambar); border-radius: 6px; padding: 6px 10px; background: #fffaf0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .dist-para { font-size: 12px; font-weight: 700; color: #111; text-align: right; }
   .dist-ver { font-size: 11px; font-weight: 700; color: var(--ambar); text-align: right; letter-spacing: .2px; }
   .dist-esp { font-size: 12px; border: 1px dashed var(--ambar); border-radius: 8px; padding: 8px 12px; background: #fffaf0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .dist-esp ul { margin: 2px 0 6px 18px; padding: 0; }
@@ -1190,7 +1191,7 @@ function vDistribucion(a) {
   var modo = E.distModo || 'staff', version = E.distVer || 'novus';
   h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distVer', [['novus', 'Tal cual Novus'], ['especial', 'Con casos especiales']]) + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) + '</div>';
   h += '<p class="muted no-imprimir" style="font-size:12px;margin:4px 0 0">' + (version === 'novus' ? '<b>Tal cual Novus</b>: los montos como salen en el sistema, sin ningún caso especial (el cuadro de siempre).' : '<b>Con casos especiales</b>: cómo se paga de verdad, con los acuerdos de AJUSTES y al final qué cambió respecto a Novus.') + ' ' +
-    (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro del ingreso de la agencia.' : 'Versión staff: igual a la del agente, más los nombres y los coordinadores (1%).') + '</p>';
+    (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro del ingreso de la agencia. Si captador y colocador son distintos, sale una hoja para cada uno, solo con su punta.' : 'Versión staff: igual a la del agente, más los nombres y los coordinadores (1%).') + '</p>';
   var ver = E.distSel === 'todas' ? negs : negs.filter(function (n) { return n.clave === E.distSel; });
   h += ver.map(function (n) {
     var esp = n.filas.some(function (r) { return r.aj || r.comp || r.sinReparto; });
@@ -1198,7 +1199,7 @@ function vDistribucion(a) {
       : { mes: n.mes, numero: n.numero, clave: n.clave, filas: n.filas, version: 'especial', esp: esp };
     return '<div class="no-imprimir" style="max-width:640px;margin:10px auto 6px;display:flex;justify-content:flex-end;gap:8px;align-items:center">' +
       (esp ? '<span class="chip ambar">Tiene caso especial</span>' : '') + '<button class="btn" data-especial="' + esc(n.clave) + '" style="padding:5px 10px;font-size:13px">✏️ Caso especial</button></div>' +
-      hojaDistribucion(hoja, a, modo === 'agente');
+      hojasDistribucion(hoja, a, modo === 'agente');
   }).join('');
   return h;
 }
@@ -1231,6 +1232,36 @@ function cambiosEspeciales(n, ag, paraAgente) {
   });
   return out;
 }
+/* Para entregar a los agentes: si captador y colocador son personas distintas de la misma agencia, sale una hoja
+ * para cada uno, solo con su punta (ve el nombre del otro, no su nivel ni su pago). Los que comparten una misma
+ * punta sí la ven completa. La versión staff sigue siendo una sola hoja con todo. */
+function hojasDistribucion(n, a, paraAgente) {
+  if (!paraAgente) return hojaDistribucion(n, a, false);
+  var puntas = [], nombres = [];
+  n.filas.forEach(function (r) {
+    var g = null;
+    if (!(r.punta > 0)) g = puntas.filter(function (x) { return x.rol === r.rol; })[0]; // comparte la punta de otro (simulación)
+    if (!g) { g = { rol: r.rol, filas: [], gente: [] }; puntas.push(g); }
+    g.filas.push(r);
+    [r.agente, r.comp ? r.comparteCon : ''].forEach(function (p) {
+      if (!p) return;
+      if (g.gente.indexOf(p) < 0) g.gente.push(p);
+      if (nombres.indexOf(p) < 0) nombres.push(p);
+    });
+  });
+  var hojas = nombres.map(function (p) {
+    var filas = [];
+    puntas.forEach(function (g) { if (g.gente.indexOf(p) >= 0) filas = filas.concat(g.filas); });
+    return { para: p, filas: filas };
+  });
+  if (hojas.every(function (x) { return x.filas.length === n.filas.length; })) return hojaDistribucion(n, a, true); // todos ven lo mismo: una sola hoja
+  var deCasa = n.filas.map(function (r) { return r.agente; });
+  return hojas.map(function (x) {
+    var c = {}; Object.keys(n).forEach(function (k) { c[k] = n[k]; });
+    c.filas = x.filas; c.para = x.para; c.deCasa = deCasa;
+    return hojaDistribucion(c, a, true);
+  }).join('');
+}
 function hojaDistribucion(n, a, paraAgente) {
   var P = E.datos.cuadro.distribucion || { regalia: 0.05, iva: 0.16, ivaAgente: 0.8, coord: {}, broker: {}, uno: {} };
   var f = n.filas, r0 = f[0], ag = a.agencia;
@@ -1246,15 +1277,17 @@ function hojaDistribucion(n, a, paraAgente) {
   function porDist(x) { return dist ? p2(x / dist) : ''; }
   function fila(t, pc, v, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + t + '</td><td class="d">' + (pc || '') + '</td><td class="d">' + (v === '' ? '' : fmt.format(v || 0)) + '</td></tr>'; }
   var nivelDe = {}; f.forEach(function (r) { nivelDe[r.agente] = r.nivel; });
-  function persona(rol, nombre) { return rol.toUpperCase() + ': ' + esc(nombre) + (nivelDe[nombre] ? ' ' + pct(nivelDe[nombre]) : ' (otra agencia)'); }
+  function persona(rol, nombre) { return rol.toUpperCase() + ': ' + esc(nombre) + (nivelDe[nombre] ? ' ' + pct(nivelDe[nombre]) : n.para && n.deCasa.indexOf(nombre) >= 0 ? '' : ' (otra agencia)'); }
   function nom(x) { return x ? ' (' + esc(x.toUpperCase()) + ')' : ''; }
   var sim = n.sim, anio = n.anio || E.datos.anio;
+  // Hoja de un solo agente en la simulación: el lado que no es suyo sale sin porcentajes
+  function ladoSim(i) { return !n.para || f.some(function (r) { return r.lado === i; }) ? sim.lados[i] : sim.ladosSin[i]; }
 
   var h = '<div class="hoja hoja-dist">';
-  h += '<div class="dist-cab"><div><div class="dist-tit">CUADRO DE DISTRIBUCIÓN</div><div>' + esc(n.mes.toUpperCase()) + ' ' + anio + ' · ' + esc(ag.toUpperCase()) + '</div></div><div class="dist-n">' + (sim ? 'SIMULACIÓN' : 'Nº ' + n.numero) + (n.version === 'especial' && n.esp ? '<div class="dist-ver">con casos especiales</div>' : '') + '</div></div>';
+  h += '<div class="dist-cab"><div><div class="dist-tit">CUADRO DE DISTRIBUCIÓN</div><div>' + esc(n.mes.toUpperCase()) + ' ' + anio + ' · ' + esc(ag.toUpperCase()) + '</div></div><div class="dist-n">' + (sim ? 'SIMULACIÓN' : 'Nº ' + n.numero) + (n.version === 'especial' && n.esp ? '<div class="dist-ver">con casos especiales</div>' : '') + (n.para ? '<div class="dist-para">Para: ' + esc(corto(n.para)) + '</div>' : '') + '</div></div>';
   if (sim) h += '<div class="dist-sim">' + (sim.cobrada ? 'Cobrada, pero todavía no sale cerrada en el sistema' : 'Negociación sin cerrar' + (sim.avance ? ' (avance ' + pct(sim.avance) + (sim.status ? ', ' + esc(sim.status.toLowerCase()) : '') + ')' : '')) + '. Los montos son una estimación y pueden cambiar al cierre.</div>';
   h += '<div class="dist-des"><b>' + esc(r0.descripcion) + (r0.sinReparto ? ' (sin reparto)' : '') + '</b><br>' +
-    (sim ? 'CAPTADOR: ' + sim.captador + '<br>COLOCADOR: ' + sim.colocador : persona('Captador', r0.captador) + '<br>' + persona('Colocador', r0.colocador)) +
+    (sim ? 'CAPTADOR: ' + ladoSim(0) + '<br>COLOCADOR: ' + ladoSim(sim.lados.length > 1 ? 1 : 0) : persona('Captador', r0.captador) + '<br>' + persona('Colocador', r0.colocador)) +
     '<br><span class="muted">' + (sim ? '' : 'Código: ' + esc(r0.codigo || '—') + ' · Cierre: ' + esc(r0.cierre || '—') + ' · ') + 'Monto: $' + fmt.format(r0.monto) + ' · Comisión total: $' + fmt.format(r0.comision) + '</span></div>';
   h += '<table class="dist-t"><tbody>';
   h += fila('<b>INGRESO COMISIÓN BRUTA</b>', '', cb, 'sub');
@@ -1381,8 +1414,9 @@ function simular(n) {
   var mesN = n.anio * 12 + M.indexOf(n.mes);
   function pctDe(i, j, a, cuantos) { var k = i + '|' + j; return aj.pct[k] != null ? aj.pct[k] : (a.nivel || 0) / cuantos; }
   // Texto de cada lado para la cabecera: "Leyda González 30% / Belkis Prao 50%"
-  var cab = n.lados.map(function (l, i) {
+  var cabSin = [], cab = n.lados.map(function (l, i) {
     var mios = l.agentes.filter(function (a) { return hojas[a.ag]; });
+    cabSin.push(l.agentes.map(function (a) { return esc(a.nombre) + (hojas[a.ag] ? '' : ' (otra oficina)'); }).join(' / '));
     return l.agentes.map(function (a, j) {
       if (!hojas[a.ag]) return esc(a.nombre) + ' (otra oficina)';
       return esc(a.nombre) + ' ' + fmt0.format(pctDe(i, j, a, mios.length) * 100) + '%';
@@ -1404,7 +1438,7 @@ function simular(n) {
         if (!x.a.nivel && aj.pct[i + '|' + x.j] == null) faltaNivel.push(x.a.nombre);
         var primero = k === 0, comAg = dist * pcts[k], ivaAg = primero ? ivaAgTot : 0; // el IVA lo paga completo el que lleva la punta en el sistema (el primero)
         hojas[ag].push({
-          agente: x.a.nombre, rol: l.rol, nivel: pcts[k], descripcion: simDescripcion(n), monto: n.monto, comision: aj.comision,
+          agente: x.a.nombre, rol: l.rol, lado: i, nivel: pcts[k], descripcion: simDescripcion(n), monto: n.monto, comision: aj.comision,
           punta: primero ? punta : 0, regalia: primero ? reg : 0, dist: primero ? dist : 0,
           coord: primero && !(aj.sinCoord || {})[i] ? dist * t.coord : 0, broker: primero ? dist * (P.pctBroker || 0) : 0,
           unoPct: primero && !(aj.sinCoord || {})[i] ? dist * (t[ag] || 0) : 0, unoExtra: primero && conExtra && !(aj.sinCoord || {})[i] ? dist * X.pct : 0,
@@ -1414,7 +1448,7 @@ function simular(n) {
     });
   });
   var lados = { captador: cab[0] || '', colocador: n.lados.length > 1 ? cab[1] : cab[0] };
-  return { hojas: hojas, cab: lados, faltaNivel: faltaNivel };
+  return { hojas: hojas, cab: lados, lados: cab, ladosSin: cabSin, faltaNivel: faltaNivel };
 }
 function vSimulacion() {
   var L = E.datos.cuadro.porCerrar, M = E.ini.meses;
@@ -1436,7 +1470,7 @@ function vSimulacion() {
   h += '<button class="btn" data-imprimir-dist="agente">Imprimir para agentes</button><button class="btn pri" data-imprimir-dist="staff">Imprimir para staff</button></div>';
   var modo = E.distModo || 'staff';
   h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) +
-    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro del ingreso de la agencia.' : 'Igual a la del agente, más los nombres y los coordinadores (1%), que salen del ingreso de la agencia.') + '</span></div>';
+    '<span class="muted" style="font-size:12px">' + (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro del ingreso de la agencia. Si captador y colocador son distintos, sale una hoja para cada uno, solo con su punta.' : 'Igual a la del agente, más los nombres y los coordinadores (1%), que salen del ingreso de la agencia.') + '</span></div>';
 
   var S = simular(n), aj = simAjuste(n);
   // Ajustes (no se imprimen)
@@ -1462,9 +1496,9 @@ function vSimulacion() {
   ['Avanti', 'Avanti II'].forEach(function (ag) {
     if (!S.hojas[ag].length) return;
     hay = true;
-    var hoja = { mes: n.mes, anio: n.anio, numero: '', filas: S.hojas[ag], sim: { avance: n.avance, status: n.status, cobrada: n.porCobrar <= 0.005 && n.pagado > 0, captador: S.cab.captador, colocador: S.cab.colocador } };
+    var hoja = { mes: n.mes, anio: n.anio, numero: '', filas: S.hojas[ag], sim: { avance: n.avance, status: n.status, cobrada: n.porCobrar <= 0.005 && n.pagado > 0, lados: S.lados, ladosSin: S.ladosSin } };
     hoja.filas[0].descripcion = desc;
-    h += hojaDistribucion(hoja, { agencia: ag }, modo === 'agente');
+    h += hojasDistribucion(hoja, { agencia: ag }, modo === 'agente');
   });
   if (!hay) h += '<div class="card vacio">Ninguno de los agentes de esta negociación es de Avanti o Avanti II. Revisa los nombres en la negociación.</div>';
   return h;
@@ -3239,7 +3273,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-12T22:07:23.360Z';
+  var VERSION = '2026-11-16T19:30:56.142Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
