@@ -1194,7 +1194,7 @@ function vDistribucion(a) {
   var modo = E.distModo || 'staff', version = E.distVer || 'novus';
   h += '<div class="barra-filtros no-imprimir" style="margin-top:8px">' + seg('distVer', [['novus', 'Tal cual Novus'], ['especial', 'Con casos especiales']]) + seg('distModo', [['staff', 'Ver completo (staff)'], ['agente', 'Ver como agente']]) + '</div>';
   h += '<p class="muted no-imprimir" style="font-size:12px;margin:4px 0 0">' + (version === 'novus' ? '<b>Tal cual Novus</b>: los montos como salen en el sistema, sin ningún caso especial (el cuadro de siempre).' : '<b>Con casos especiales</b>: cómo se paga de verdad, con los acuerdos de AJUSTES y al final qué cambió respecto a Novus.') + ' ' +
-    (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro del ingreso de la agencia. Si captador y colocador son distintos, sale una hoja para cada uno, solo con su punta.' : 'Versión staff: igual a la del agente, más los nombres y los coordinadores (1%).') + '</p>';
+    (modo === 'agente' ? 'Como lo ve el agente: salen broker y gerente de ventas; los coordinadores (1%) quedan dentro del ingreso de la agencia. Si captador y colocador son distintos, sale una hoja para cada uno, solo con su punta.' : 'Versión staff: igual a la del agente, más los nombres y el coordinador de la agencia. El 1% que se paga por sueldos no sale aquí (en el Resumen sí).') + '</p>';
   var ver = E.distSel === 'todas' ? negs : negs.filter(function (n) { return n.clave === E.distSel; });
   h += ver.map(function (n) {
     var esp = n.filas.some(function (r) { return r.aj || r.comp || r.sinReparto; });
@@ -1230,7 +1230,12 @@ function cambiosEspeciales(n, ag, paraAgente) {
     cambio('spiff', 'SPIFF');
     cambio('coord', 'Gerente de ventas' + (paraAgente ? '' : ' (' + (P.coord[ag] || '') + ')'));
     cambio('broker', 'Broker' + (paraAgente ? '' : ' (' + (P.broker[ag] || '') + ')'));
-    if (!paraAgente) { cambio('unoPct', 'Coordinador (' + (P.uno[ag] || '') + ')'); cambio('unoExtra', 'Coordinador (' + ((P.extra || {}).persona || '') + ')'); if (n.conTotal) cambio('total', 'Total agencia'); }
+    if (!paraAgente) { // el 1% que sale de sueldos (quien cobra el «1% extra») no va en el cuadro de distribución
+      var deOf = (P.extra || {}).persona || '';
+      if (!(deOf && P.uno[ag] === deOf)) cambio('unoPct', 'Coordinador (' + (P.uno[ag] || '') + ')');
+      if (!deOf) cambio('unoExtra', 'Coordinador (' + ((P.extra || {}).persona || '') + ')');
+      if (n.conTotal) cambio('total', 'Total agencia');
+    }
     if (lineas.length) out.push({ quien: corto(r.agente) + ' · ' + r.rol, lineas: lineas, nota: r.aj && r.aj.nota });
   });
   return out;
@@ -1296,8 +1301,9 @@ function hojaDistribucion(n, a, paraAgente) {
   h += fila('<b>INGRESO COMISIÓN BRUTA</b>', '', cb, 'sub');
   h += fila('REGALÍA MASTER', p2(P.regalia), reg);
   h += fila('IVA REGALÍA', p2(P.iva), ivaReg);
-  h += fila('IVA a pagar oficina', p2(1 - P.ivaAgente), ivaOf, 'det');
-  h += fila('IVA a pagar agente', p2(P.ivaAgente), ivaAg, 'det');
+  // El agente paga el IVA de la regalía según su nivel; la oficina, el resto
+  h += fila('IVA a pagar oficina', ivaReg ? p2(ivaOf / ivaReg) : '', ivaOf, 'det');
+  h += fila('IVA a pagar agente', ivaReg ? p2(ivaAg / ivaReg) : '', ivaAg, 'det');
   h += fila('<b>COMISIÓN NETA</b>', '', neta, 'sub');
   // Con dos puntas de porcentajes distintos no se promedia: cada punta sale en su línea con su propio %
   var conDist = f.filter(function (r) { return r.dist > 0; });
@@ -1313,9 +1319,9 @@ function hojaDistribucion(n, a, paraAgente) {
   h += '<div class="dist-sec">PAGO DE COMISIONES INDIVIDUALES</div>';
   var personas = [], pos = {};
   f.forEach(function (r) {
-    if (pos[r.agente] === undefined) { pos[r.agente] = personas.length; personas.push({ nombre: r.agente, roles: [], comAg: 0, spiff: 0, ivaAg: 0, cancelar: 0 }); }
+    if (pos[r.agente] === undefined) { pos[r.agente] = personas.length; personas.push({ nombre: r.agente, roles: [], comAg: 0, spiff: 0, ivaAg: 0, ivaBase: 0, cancelar: 0 }); }
     var x = personas[pos[r.agente]];
-    x.roles.push(r.rol); x.comAg += r.comAg; x.spiff += r.spiff; x.ivaAg += r.ivaAg; x.cancelar += r.cancelar;
+    x.roles.push(r.rol); x.comAg += r.comAg; x.spiff += r.spiff; x.ivaAg += r.ivaAg; x.ivaBase += (r.regalia || 0) * P.iva; x.cancelar += r.cancelar;
   });
   // Casos especiales: la parte de una punta que va a otra persona (no paga IVA; lo paga el del sistema)
   f.forEach(function (r) {
@@ -1326,7 +1332,7 @@ function hojaDistribucion(n, a, paraAgente) {
     h += '<table class="dist-t dist-ag"><tbody><tr class="sub"><td>' + esc(x.nombre.toUpperCase()) + '</td><td class="d muted" style="font-weight:500">' + (x.roles.length > 1 ? 'Doble punta' : esc(x.roles[0])) + '</td><td class="d"></td></tr>';
     h += fila('Comisiones', '', x.comAg);
     h += fila('SPIFF', '', x.spiff ? x.spiff : '');
-    h += fila('(−) ' + pct(P.ivaAgente) + ' IVA regalía', '', x.ivaAg);
+    h += fila('(−) ' + (x.ivaBase && x.ivaAg ? pct(x.ivaAg / x.ivaBase) + ' ' : '') + 'IVA regalía', '', x.ivaAg);
     h += fila('<b>Total a cancelar</b>', '', x.cancelar, 'tot');
     h += '</tbody></table>';
   });
@@ -1336,7 +1342,12 @@ function hojaDistribucion(n, a, paraAgente) {
   h += fila('TOTAL INGRESO BRUTO AGENCIA', porDist(bruto), bruto);
   h += fila('IVA REGALÍA EMPRESA', '', ivaOf);
   h += fila('<b>TOTAL INGRESO NETO AGENCIA</b>', porDist(netoAg), netoAg, 'tot');
-  if (!paraAgente && (uno || extra)) { // solo en la versión staff: los coordinadores salen del ingreso de la agencia
+  // Solo en la versión staff: los coordinadores salen del ingreso de la agencia.
+  // El 1% de quien cobra el «1% extra» (Roman) se paga por sueldos, de la oficina: no se plasma en este cuadro (en el Resumen sí).
+  var deOficina = (P.extra || {}).persona || '';
+  if (deOficina && P.uno[ag] === deOficina) uno = 0;
+  if (deOficina) extra = 0;
+  if (!paraAgente && (uno || extra)) {
     if (uno) h += fila('(−) COORDINADOR' + nom(P.uno[ag]), porDist(uno), uno, 'det');
     if (extra) h += fila('(−) COORDINADOR' + nom((P.extra || {}).persona), porDist(extra), extra, 'det');
     h += fila('<b>QUEDA A LA OFICINA</b>', porDist(netoAg - uno - extra), netoAg - uno - extra, 'sub');
@@ -1421,6 +1432,7 @@ function simular(n) {
   var P = E.datos.cuadro.distribucion || {}, aj = simAjuste(n), T = P.tabla || {}, X = P.extra || {}, M = E.ini.meses;
   var hojas = { 'Avanti': [], 'Avanti II': [] }, faltaNivel = [];
   var mesN = n.anio * 12 + M.indexOf(n.mes);
+  function pcts0(i, lista) { return pctDe(i, lista[0].j, lista[0].a, lista.length); }
   function pctDe(i, j, a, cuantos) { var k = i + '|' + j; return aj.pct[k] != null ? aj.pct[k] : (a.nivel || 0) / cuantos; }
   // Texto de cada lado para la cabecera: "Leyda González 30% / Belkis Prao 50%"
   var cabSin = [], cab = n.lados.map(function (l, i) {
@@ -1441,7 +1453,7 @@ function simular(n) {
       var reg = punta * (P.regalia || 0), dist = punta - reg;
       var t = T[Math.round((lista[0].a.nivel || 0) * 100)] || { coord: 0, 'Avanti': 0, 'Avanti II': 0 };
       var conExtra = ag === 'Avanti II' && X.pct && mesN >= X.desdeAnio * 12 + M.indexOf(X.desdeMes);
-      var ivaAgTot = reg * (P.iva || 0) * (P.ivaAgente || 0);
+      var ivaAgTot = reg * (P.iva || 0) * (lista[0].a.nivel || pcts0(i, lista) || 0); // según el nivel de quien lleva la punta
       var pcts = lista.map(function (x) { return pctDe(i, x.j, x.a, lista.length); });
       lista.forEach(function (x, k) {
         if (!x.a.nivel && aj.pct[i + '|' + x.j] == null) faltaNivel.push(x.a.nombre);
@@ -3116,7 +3128,7 @@ function vParametros() {
   var P = E.cfg.parametros, h = '';
   h += '<div class="grid g2">';
   h += '<div class="card"><div class="card-t"><b>Porcentajes generales</b></div><div class="form">';
-  [['regalia', 'Regalía RE/MAX (%)'], ['broker', 'Broker (%)'], ['iva', 'IVA (%)'], ['ivaAgente', 'IVA que se le paga al agente (%)']].forEach(function (x) {
+  [['regalia', 'Regalía RE/MAX (%)'], ['broker', 'Broker (%)'], ['iva', 'IVA (%)']].forEach(function (x) {
     h += '<div><label>' + x[1] + '</label><input data-p="' + x[0] + '" inputmode="decimal" value="' + p100(P[x[0]]) + '"></div>';
   });
   h += '</div></div>';
@@ -3204,7 +3216,7 @@ function enlazarConfig() {
   $$('[data-agnuevo]').forEach(function (el) { el.addEventListener('click', function () { abrirAgente(null); }); });
   var pOk = $('#pOk');
   if (pOk) pOk.addEventListener('click', function () {
-    var P = E.cfg.parametros, nuevo = { regalia: 0, broker: 0, iva: 0, ivaAgente: 0, niveles: [], quien: { coord: [], broker: [], uno: [] }, anio: E.cfg.anio, metasMes: { 'A I': [], 'A II': [] }, metaCapt: numero($('#pCap').value) };
+    var P = E.cfg.parametros, nuevo = { regalia: 0, broker: 0, iva: 0, ivaAgente: P.ivaAgente, niveles: [], quien: { coord: [], broker: [], uno: [] }, anio: E.cfg.anio, metasMes: { 'A I': [], 'A II': [] }, metaCapt: numero($('#pCap').value) };
     $$('[data-p]').forEach(function (i) { nuevo[i.dataset.p] = de100(i.value); });
     if (!(nuevo.regalia > 0 && nuevo.regalia < 0.5)) { toast('Revisa la regalía'); return; }
     $$('[data-q]').forEach(function (i) { var k = i.dataset.q.split(':'); nuevo.quien[k[0]][Number(k[1])] = i.value.trim(); });
@@ -3282,7 +3294,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-16T19:40:41.815Z';
+  var VERSION = '2026-11-16T19:53:06.839Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
