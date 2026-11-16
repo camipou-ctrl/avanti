@@ -1058,7 +1058,10 @@ function tablaStaff(ag, conEntregar) {
     if (abierto) p.detalle.forEach(function (x) {
       var quienes = x.agentes.map(function (a) { return esc(corto(a.agente)) + ' (' + esc(a.rol.toLowerCase()) + (a.nivel ? ' ' + pct(a.nivel) : '') + ')'; }).join(', ');
       h += '<tr class="detalle"><td colspan="5"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div>' + (esAnio() ? esc(x.mes) + ' · ' : '') + (x.provisional ? '<span class="chip ambar" style="font-size:11px;padding:1px 6px">cobrada, falta en Novus</span> ' : '<b>Nº ' + x.numero + '</b> · ') + esc(x.descripcion) + (Math.abs(x.monto) < 0.005 ? ' <span class="chip ambar" style="font-size:11px;padding:1px 6px">no da nada' + (x.sinReparto ? ' · sin reparto' : '') + '</span>' : '') +
-        '<div class="muted" style="font-size:12px">' + esc(x.concepto) + ' ' + p2(x.dist ? x.monto / x.dist / (x.cobrado || 1) : 0) + ' de ' + d(x.dist) + (x.provisional && x.cobrado < 0.999 ? ' · solo se ha cobrado ' + d(x.pagado) + ' de ' + d(x.proyeccion) + ', le toca esa parte' : '') + ' · ' + quienes + (x.codigo ? ' · #' + esc(x.codigo) : '') + '</div></div>' +
+        '<div class="muted" style="font-size:12px">' + (x.agentes.length > 1
+          // cada punta por separado, con su propio porcentaje (no se promedian)
+          ? x.agentes.map(function (a) { return esc(corto(a.agente)) + ' (' + esc(a.rol.toLowerCase()) + (a.nivel ? ' ' + pct(a.nivel) : '') + '): ' + esc(x.concepto.toLowerCase()) + ' ' + p2(a.dist ? a.monto / a.dist / (x.cobrado || 1) : 0) + ' de ' + d(a.dist) + ' = <b>' + d(a.monto) + '</b>'; }).join('<br>') + '<br>'
+          : esc(x.concepto) + ' ' + p2(x.dist ? x.monto / x.dist / (x.cobrado || 1) : 0) + ' de ' + d(x.dist)) + (x.provisional && x.cobrado < 0.999 ? ' · solo se ha cobrado ' + d(x.pagado) + ' de ' + d(x.proyeccion) + ', le toca esa parte' : '') + (x.agentes.length > 1 ? '' : ' · ' + quienes) + (x.codigo ? ' · #' + esc(x.codigo) : '') + '</div></div>' +
         '<b class="num" style="white-space:nowrap">' + d(x.monto) + '</b></div></td></tr>';
     });
   });
@@ -1296,9 +1299,15 @@ function hojaDistribucion(n, a, paraAgente) {
   h += fila('IVA a pagar oficina', p2(1 - P.ivaAgente), ivaOf, 'det');
   h += fila('IVA a pagar agente', p2(P.ivaAgente), ivaAg, 'det');
   h += fila('<b>COMISIÓN NETA</b>', '', neta, 'sub');
-  h += fila('COMISIÓN AGENTES', porDist(comAg), comAg);
-  h += fila('BROKER' + (paraAgente ? '' : nom(P.broker[ag])), porDist(broker), broker);
-  h += fila('GTE DE VENTAS ' + esc(ag.toUpperCase()) + (paraAgente ? '' : nom(P.coord[ag])), porDist(coord), coord);
+  // Con dos puntas de porcentajes distintos no se promedia: cada punta sale en su línea con su propio %
+  var conDist = f.filter(function (r) { return r.dist > 0; });
+  function varias(k) { return conDist.length > 1 && conDist.some(function (r) { return Math.abs((r[k] || 0) / r.dist - (conDist[0][k] || 0) / conDist[0].dist) > 0.0001; }); }
+  function porPunta(k) { return conDist.map(function (r) { return fila(esc(corto(r.agente)) + ' (' + esc(String(r.rol).toLowerCase()) + ')', p2((r[k] || 0) / r.dist), r[k] || 0, 'det'); }).join(''); }
+  h += fila('COMISIÓN AGENTES', varias('comAg') ? '' : porDist(comAg), comAg);
+  h += fila('BROKER' + (paraAgente ? '' : nom(P.broker[ag])), varias('broker') ? '' : porDist(broker), broker);
+  if (varias('broker')) h += porPunta('broker');
+  h += fila('GTE DE VENTAS ' + esc(ag.toUpperCase()) + (paraAgente ? '' : nom(P.coord[ag])), varias('coord') ? '' : porDist(coord), coord);
+  if (varias('coord')) h += porPunta('coord');
   h += '</tbody></table>';
 
   h += '<div class="dist-sec">PAGO DE COMISIONES INDIVIDUALES</div>';
@@ -3273,7 +3282,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-16T19:33:40.838Z';
+  var VERSION = '2026-11-16T19:40:41.815Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
