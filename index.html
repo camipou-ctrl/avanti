@@ -1052,12 +1052,12 @@ function tablaStaff(ag, conEntregar) {
   lista.forEach(function (p) {
     var k = 'staff|' + ag + '|' + p.persona, abierto = E.abiertos[k];
     t.total += p.total; t.entregado += p.entregado; t.saldo += p.saldo;
-    h += '<tr class="click" data-abrir="' + esc(k) + '"><td><span class="nombre-ag">' + (abierto ? '▾ ' : '▸ ') + esc(p.persona) + '</span><div class="muted" style="font-size:12px">' + p.conceptos.map(function (c) { return esc(c.concepto); }).join(' · ') + ' · ' + p.detalle.length + ' neg.' + (p.provisional ? ' · <span style="color:var(--ambar)">incluye ' + d(p.provisional) + ' cobrado que falta en Novus</span>' : '') + '</div></td>' +
+    h += '<tr class="click" data-abrir="' + esc(k) + '"><td><span class="nombre-ag">' + (abierto ? '▾ ' : '▸ ') + esc(p.persona) + '</span><div class="muted" style="font-size:12px">' + p.conceptos.map(function (c) { return esc(c.concepto); }).join(' · ') + ' · ' + p.detalle.length + ' neg.' + (function (z) { return z ? ' (' + z + ' en 0)' : ''; })(p.detalle.filter(function (x) { return Math.abs(x.monto) < 0.005; }).length) + (p.provisional ? ' · <span style="color:var(--ambar)">incluye ' + d(p.provisional) + ' cobrado que falta en Novus</span>' : '') + '</div></td>' +
       '<td class="d num">' + d(p.total) + '</td><td class="d num ocultar-movil">' + d(p.entregado) + '</td><td class="d num"><b>' + d(p.saldo) + '</b></td>' +
       (conEntregar ? '<td class="d"><button class="btn" style="padding:5px 9px;font-size:13px" data-entrega="' + esc(p.persona) + '" data-entrega-ag="' + esc(ag) + '">Entregar</button></td>' : '') + '</tr>';
     if (abierto) p.detalle.forEach(function (x) {
       var quienes = x.agentes.map(function (a) { return esc(corto(a.agente)) + ' (' + esc(a.rol.toLowerCase()) + (a.nivel ? ' ' + pct(a.nivel) : '') + ')'; }).join(', ');
-      h += '<tr class="detalle"><td colspan="5"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div>' + (esAnio() ? esc(x.mes) + ' · ' : '') + (x.provisional ? '<span class="chip ambar" style="font-size:11px;padding:1px 6px">cobrada, falta en Novus</span> ' : '<b>Nº ' + x.numero + '</b> · ') + esc(x.descripcion) +
+      h += '<tr class="detalle"><td colspan="5"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div>' + (esAnio() ? esc(x.mes) + ' · ' : '') + (x.provisional ? '<span class="chip ambar" style="font-size:11px;padding:1px 6px">cobrada, falta en Novus</span> ' : '<b>Nº ' + x.numero + '</b> · ') + esc(x.descripcion) + (Math.abs(x.monto) < 0.005 ? ' <span class="chip ambar" style="font-size:11px;padding:1px 6px">no da nada' + (x.sinReparto ? ' · sin reparto' : '') + '</span>' : '') +
         '<div class="muted" style="font-size:12px">' + esc(x.concepto) + ' ' + p2(x.dist ? x.monto / x.dist / (x.cobrado || 1) : 0) + ' de ' + d(x.dist) + (x.provisional && x.cobrado < 0.999 ? ' · solo se ha cobrado ' + d(x.pagado) + ' de ' + d(x.proyeccion) + ', le toca esa parte' : '') + ' · ' + quienes + (x.codigo ? ' · #' + esc(x.codigo) : '') + '</div></div>' +
         '<b class="num" style="white-space:nowrap">' + d(x.monto) + '</b></div></td></tr>';
     });
@@ -3273,7 +3273,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-16T19:30:56.142Z';
+  var VERSION = '2026-11-16T19:33:40.838Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
