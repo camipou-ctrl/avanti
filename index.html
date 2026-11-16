@@ -1638,9 +1638,19 @@ function vCuadre() {
     '<span class="chip verde">' + C.ok + ' cuadran</span>' +
     '<span class="chip ambar">' + C.enProceso.length + ' por actualizar</span>' +
     '<span class="chip rojo">' + C.faltan.length + ' no están en la base</span>' +
+    ((C.distintas || []).length ? '<span class="chip rojo">' + C.distintas.length + ' con monto distinto a Novus</span>' : '') +
     (C.sinSistema.length ? '<span class="chip">' + C.sinSistema.length + ' para revisar</span>' : '') + '</div>';
   if (!C.totalSistema) return h + '<div class="card vacio">No hay transacciones del sistema en ' + D.mes + '. Importa el listado primero.</div>';
 
+  if ((C.distintas || []).length) {
+    h += '<h3 style="margin:4px 0 2px">Montos distintos entre la base y Novus</h3><p class="sub">El cuadro se calcula con lo que trae Novus. Si el número bueno es el de la base, hay que corregirlo en Novus y volver a importar el listado; si el bueno es el de Novus, edita la negociación.</p>';
+    h += '<div class="negs">' + C.distintas.map(function (t, i) {
+      return '<div class="card" style="border-color:var(--rojo)"><div style="display:flex;justify-content:space-between;gap:8px"><div class="quien" style="font-weight:600">' + esc(corto(t.captador)) + (t.colocador && t.colocador !== t.captador ? ' <span class="muted" style="font-weight:400">→</span> ' + esc(corto(t.colocador)) : ' <span class="muted" style="font-weight:400">capta y coloca</span>') + '</div><span class="chip">#' + esc(t.codigo) + '</span></div>' +
+        '<div class="muted" style="font-size:13px;margin:2px 0 8px">' + esc(t.operacion) + ' · ' + esc(t.tipo) + ' · ' + esc(t.zona) + ' · cerró ' + esc(t.fechaTxt) + '</div>' +
+        t.difs.map(function (x) { return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:13px;padding:3px 0"><b>' + esc(x.que) + '</b><span>Base ' + d(x.base) + ' · Novus ' + d(x.sistema) + ' · <b style="color:var(--rojo)">' + (x.sistema - x.base > 0 ? '+' : '−') + d(Math.abs(x.sistema - x.base)) + '</b></span></div>'; }).join('') +
+        '<div class="pie" style="margin-top:10px"><button class="btn" data-dif-ok="' + i + '">✓ Está bien así</button><button class="btn" data-editar="' + t.base.fila + '">Editar en la base</button></div></div>';
+    }).join('') + '</div><div style="height:18px"></div>';
+  }
   if (C.enProceso.length) {
     h += '<div class="card-t" style="margin-top:4px"><h3 style="margin:0">Cerradas en el sistema, en proceso en la base</h3><button class="btn pri" data-todas="enProceso">Actualizar todas</button></div>';
     h += '<div class="negs">' + C.enProceso.map(function (t, i) { return tarjetaCuadre(t, 'enProceso', i); }).join('') + '</div><div style="height:18px"></div>';
@@ -1656,7 +1666,7 @@ function vCuadre() {
     }).join('') + '</div>';
   }
   if (C.vistas) h += '<p class="muted" style="font-size:13px;margin-top:12px">' + C.vistas + ' marcada' + (C.vistas > 1 ? 's' : '') + ' como «está bien» · <a href="#" id="cuadreVer">volver a mostrar</a></p>';
-  if (!C.enProceso.length && !C.faltan.length) h += '<div class="card vacio">Todo cuadra. 👌</div>';
+  if (!C.enProceso.length && !C.faltan.length && !(C.distintas || []).length) h += '<div class="card vacio">Todo cuadra. 👌</div>';
   return h;
 }
 function tarjetaCuadre(t, grupo, i) {
@@ -1710,6 +1720,13 @@ function enlazarCuadre() {
         card.style.opacity = .45; btn.textContent = 'Listo ✓'; toast('Actualizada');
         E.datosViejos = true;
       }).catch(function (e) { btn.disabled = false; toast('No se guardó: ' + (e.message || e), 5000); });
+    });
+  });
+  $$('[data-dif-ok]').forEach(function (b) {
+    b.addEventListener('click', function (ev) {
+      ev.stopPropagation(); var C = E.cuadre[claveMes()], n = C.distintas[Number(b.dataset.difOk)]; b.disabled = true;
+      api('app_cuadreOk', n.claveOk).then(function () { C.distintas.splice(C.distintas.indexOf(n), 1); C.vistas = (C.vistas || 0) + 1; pintar(); toast('Listo, no vuelve a salir'); })
+        .catch(function (e) { b.disabled = false; toast(e.message, 5000); });
     });
   });
   $$('[data-cuadre-ok]').forEach(function (b) {
@@ -1967,7 +1984,7 @@ function buscarNeg(fila) {
   var D = E.datos, todas = D.negociaciones.concat(D.proyeccion.atrasadas);
   D.proyeccion.meses.forEach(function (g) { todas = todas.concat(g.items); });
   var C = E.cuadre[claveMes()];
-  if (C) { todas = todas.concat(C.sinSistema); C.enProceso.forEach(function (t) { if (t.base) todas.push(t.base); }); }
+  if (C) { todas = todas.concat(C.sinSistema); C.enProceso.forEach(function (t) { if (t.base) todas.push(t.base); }); (C.distintas || []).forEach(function (t) { todas.push(t.base); }); }
   return todas.filter(function (n) { return n.fila === fila; })[0];
 }
 function abrirNeg(fila) {
@@ -3294,7 +3311,7 @@ document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') $$
 </script>
 <script>
 (function () {
-  var VERSION = '2026-11-16T19:53:06.839Z';
+  var VERSION = '2026-11-16T19:55:47.645Z';
   if ('serviceWorker' in navigator) {
     var habia = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
